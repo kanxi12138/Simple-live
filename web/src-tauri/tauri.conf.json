@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "简直播",
+  "version": "4.2.0",
+  "identifier": "com.dtv.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:2896",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "简直播",
+        "fullscreen": false,
+        "resizable": true,
+        "width": 430,
+        "height": 932,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' tauri://localhost http://127.0.0.1:* http://localhost:* http://* https://* data: blob:; connect-src 'self' tauri://localhost ipc://localhost http://127.0.0.1:* http://localhost:* http://* https://* ws://127.0.0.1:* ws://localhost:* ws://* wss://*; media-src 'self' tauri://localhost http://127.0.0.1:* http://localhost:* http://* https://* data: blob:; media-src-elem 'self' tauri://localhost http://127.0.0.1:* http://localhost:* http://* https://* blob:; img-src 'self' tauri://localhost data: blob: http://127.0.0.1:* http://localhost:* http://* https://*; font-src 'self' data: https://*; script-src 'self' 'unsafe-eval' blob: 'wasm-unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; worker-src blob:; child-src blob:; object-src blob:; base-uri 'self'"
+    }
+  },
+  "plugins": {},
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese"]
+      },
+      "wix": {
+        "language": ["zh-CN"]
+      }
+    }
+  }
+}

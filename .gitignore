@@ -1,0 +1,55 @@
+# Repository metadata
+.DS_Store
+Thumbs.db
+
+# IDE and editor files
+.idea/
+.vscode/
+*.iml
+*.suo
+*.ntvs*
+*.njsproj
+*.sw?
+
+# Logs and local diagnostics
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Node and frontend build outputs
+node_modules/
+dist/
+dist.bak/
+dist-ssr/
+.next/
+out/
+*.local
+next-env.d.ts
+
+# Rust and Tauri build outputs
+target/
+**/*.rs.bk
+.cargo/
+src-tauri/gen/android/
+src-tauri/keys/private.key
+
+# Android and Gradle build outputs
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+key.properties
+.tauri/
+tauri.settings.gradle
+
+# Generated files and signing artifacts
+*.idsig
+*.keystore
+
+# Temporary tools and caches
+_tmp_tools/
