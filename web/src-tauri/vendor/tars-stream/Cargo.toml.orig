@@ -1,0 +1,17 @@
+[package]
+name = "tars-stream"
+version = "0.1.1"
+authors = ["zerolocust <zerolocust@gmail.com>"]
+description = "for tencent/Tars TARS Protocol encoding/decoding"
+homepage = "https://github.com/zerolocusta/tars-stream"
+repository = "https://github.com/zerolocusta/tars-stream"
+
+license = "MIT"
+
+[dependencies]
+bytes = "0.4"
+quick-error = "1.2.2"
+
+[dev-dependencies]
+uuid = { version = "0.6", features = ["v4"] }
+rand = "0.5"

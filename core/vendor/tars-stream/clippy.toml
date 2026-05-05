@@ -1,0 +1,2 @@
+blacklisted-names = ["toto", "tata", "titi"]
+cyclomatic-complexity-threshold = 30
