@@ -7,27 +7,47 @@
             <strong>设置与迁移</strong>
             <p>保留配置导入导出，移动端改成文件流方案。</p>
           </div>
-          <button type="button" class="close-btn" @click="emit('close')">关闭</button>
+          <button
+            type="button"
+            class="close-btn"
+            @click="emit('close')"
+          >
+            关闭
+          </button>
         </div>
 
         <div class="actions">
-          <button type="button" class="action-card" :disabled="busy" @click="emit('export-config')">
+          <button
+            type="button"
+            class="action-card"
+            :disabled="busy"
+            @click="emit('export-config')"
+          >
             <Download :size="18" />
             <div>
               <strong>{{ exporting ? '导出中...' : '导出配置' }}</strong>
-              <span>关注、分组、主题、播放器偏好、B站登录态</span>
+              <span>关注、分组、主题、播放器偏好、B 站登录态。</span>
             </div>
           </button>
 
-          <button type="button" class="action-card" :disabled="busy" @click="emit('import-config')">
+          <button
+            type="button"
+            class="action-card"
+            :disabled="busy"
+            @click="emit('import-config')"
+          >
             <Upload :size="18" />
             <div>
               <strong>{{ importing ? '导入中...' : '导入配置' }}</strong>
-              <span>导入后会覆盖当前本地配置并刷新界面</span>
+              <span>导入后会覆盖当前本地配置并刷新界面。</span>
             </div>
           </button>
 
-          <button type="button" class="action-card" @click="emit('open-github')">
+          <button
+            type="button"
+            class="action-card"
+            @click="emit('open-github')"
+          >
             <Github :size="18" />
             <div>
               <strong>项目主页</strong>
@@ -36,31 +56,28 @@
           </button>
         </div>
 
-        <div class="webdav-card">
-          <strong>WebDAV 配置同步</strong>
-          <div class="field-grid">
-            <input :value="webdav.url" type="url" placeholder="服务器地址" @input="emitField('url', $event)" />
-            <input :value="webdav.username" type="text" placeholder="用户名" @input="emitField('username', $event)" />
-            <input :value="webdav.password" type="password" placeholder="密码" @input="emitField('password', $event)" />
-            <input :value="webdav.fileName" type="text" placeholder="远端文件名" @input="emitField('fileName', $event)" />
-          </div>
-          <div class="action-row">
-            <button type="button" class="inline-btn" :disabled="busy || syncingWebdav" @click="emit('webdav-upload')">上传配置</button>
-            <button type="button" class="inline-btn" :disabled="busy || syncingWebdav" @click="emit('webdav-download')">下载并覆盖</button>
-          </div>
-        </div>
-
-        <div class="webdav-card">
+        <div class="section-card">
           <strong>检查更新</strong>
           <div class="action-row">
-            <button type="button" class="inline-btn" :disabled="checkingUpdate" @click="emit('check-update')">
+            <button
+              type="button"
+              class="inline-btn"
+              :disabled="checkingUpdate"
+              @click="emit('check-update')"
+            >
               {{ checkingUpdate ? '检查中...' : '检查更新' }}
             </button>
           </div>
           <p v-if="updateMessage" class="update-message">{{ updateMessage }}</p>
         </div>
 
-        <p v-if="status" class="status" :class="`status--${status.tone}`">{{ status.text }}</p>
+        <p
+          v-if="status"
+          class="status"
+          :class="`status--${status.tone}`"
+        >
+          {{ status.text }}
+        </p>
       </section>
     </div>
   </transition>
@@ -76,8 +93,6 @@ const props = defineProps<{
   importing: boolean;
   appVersion: string;
   status: { tone: 'info' | 'success' | 'error'; text: string } | null;
-  webdav: { url: string; username: string; password: string; fileName: string };
-  syncingWebdav: boolean;
   checkingUpdate: boolean;
   updateMessage: string;
 }>();
@@ -87,17 +102,10 @@ const emit = defineEmits<{
   (event: 'export-config'): void;
   (event: 'import-config'): void;
   (event: 'open-github'): void;
-  (event: 'webdav-change', payload: { key: 'url' | 'username' | 'password' | 'fileName'; value: string }): void;
-  (event: 'webdav-upload'): void;
-  (event: 'webdav-download'): void;
   (event: 'check-update'): void;
 }>();
 
 const busy = computed(() => props.exporting || props.importing);
-const emitField = (key: 'url' | 'username' | 'password' | 'fileName', event: Event) => {
-  const target = event.target as HTMLInputElement;
-  emit('webdav-change', { key, value: target.value });
-};
 </script>
 
 <style scoped>
@@ -183,28 +191,12 @@ const emitField = (key: 'url' | 'username' | 'password' | 'fileName', event: Eve
   opacity: 0.68;
 }
 
-.webdav-card {
+.section-card {
   margin-top: 14px;
   padding: 14px;
   border: 1px solid var(--mobile-border);
   border-radius: 16px;
   background: var(--mobile-surface-muted);
-}
-
-.field-grid {
-  display: grid;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.field-grid input {
-  width: 100%;
-  min-height: 42px;
-  border: 1px solid var(--mobile-border);
-  border-radius: 12px;
-  background: transparent;
-  color: var(--mobile-text-primary);
-  padding: 0 12px;
 }
 
 .action-row {

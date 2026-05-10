@@ -1442,44 +1442,38 @@ html.web-fs-active .danmu-panel {
   }
 }
 
-.offline-player {
+.player-container--offline {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  padding: 36px;
+}
+
+.video-container--offline {
+  padding: 16px 20px 20px;
+  min-height: clamp(280px, 48vh, 520px);
+}
+
+.offline-placeholder {
+  width: 100%;
   height: 100%;
-  box-sizing: border-box;
-  background: rgba(10, 14, 24, 0.56);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-radius: 20px;
+  min-height: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(9, 13, 24, 0.88), rgba(14, 19, 34, 0.82)),
+    rgba(10, 14, 24, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 14px 32px rgba(3, 8, 20, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-.offline-message {
-  margin-top: 18px;
-  max-width: 34ch;
-}
-
-.offline-icon svg {
-  color: #727272;
-  /* A softer color for the icon */
-  margin-bottom: 16px;
-}
-
-.offline-player h3 {
-  font-size: 20px;
-  color: #f8fafc;
-  margin-bottom: 8px;
-}
-
-.offline-player p {
-  font-size: 14px;
-  line-height: 1.6;
-  color: rgba(203, 213, 225, 0.82);
+.offline-placeholder__label {
+  padding: 0 24px;
+  color: rgba(244, 247, 255, 0.96);
+  font-size: clamp(24px, 3.5vw, 34px);
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .streamer-info-offline {
@@ -1600,8 +1594,7 @@ html.web-fs-active .danmu-panel {
 }
 
 :root[data-theme="light"] .empty-player,
-:root[data-theme="light"] .error-player,
-:root[data-theme="light"] .offline-player {
+:root[data-theme="light"] .error-player {
   background-color: var(--content-bg-light, #ffffff);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -1611,8 +1604,7 @@ html.web-fs-active .danmu-panel {
 }
 
 :root[data-theme="light"] .empty-player .empty-icon,
-:root[data-theme="light"] .error-player .error-icon,
-:root[data-theme="light"] .offline-icon svg {
+:root[data-theme="light"] .error-player .error-icon {
   color: var(--icon-color-light, #888888);
   opacity: 0.9;
 }
@@ -1633,36 +1625,45 @@ html.web-fs-active .danmu-panel {
 }
 
 :root[data-theme="light"] .empty-player h3,
-:root[data-theme="light"] .error-player h3,
-:root[data-theme="light"] .offline-player h3 {
+:root[data-theme="light"] .error-player h3 {
   color: var(--primary-text-light, #333333);
 }
 
 :root[data-theme="light"] .empty-player p,
-:root[data-theme="light"] .error-player p,
-:root[data-theme="light"] .offline-player p {
+:root[data-theme="light"] .error-player p {
   color: var(--secondary-text-light, #555555);
   opacity: 1;
 }
 
-:root[data-theme="light"] .error-player .retry-btn,
-:root[data-theme="light"] .offline-player .retry-btn {
+:root[data-theme="light"] .error-player .retry-btn {
   background-color: var(--accent-color-light, #007bff);
   color: white;
   box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2);
 }
 
-:root[data-theme="light"] .error-player .retry-btn:hover,
-:root[data-theme="light"] .offline-player .retry-btn:hover {
+:root[data-theme="light"] .error-player .retry-btn:hover {
   background-color: var(--accent-color-hover-light, #0056b3);
   box-shadow: 0 6px 16px rgba(0, 123, 255, 0.3);
 }
 
-:root[data-theme="light"] .error-player .retry-btn:active,
-:root[data-theme="light"] .offline-player .retry-btn:active {
+:root[data-theme="light"] .error-player .retry-btn:active {
   box-shadow: 0 3px 10px rgba(0, 123, 255, 0.15);
 }
 
 :root[data-theme="light"] .streamer-info-offline {
   border-bottom: 1px solid var(--border-color-light, #e0e0e0);
+}
+
+:root[data-theme="light"] .offline-placeholder {
+  background:
+    linear-gradient(180deg, rgba(243, 246, 255, 0.98), rgba(232, 238, 250, 0.96)),
+    #eef3fb;
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+:root[data-theme="light"] .offline-placeholder__label {
+  color: #1e293b;
 }
