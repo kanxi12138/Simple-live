@@ -10,8 +10,8 @@
 
 ## 页面示例
 
-![页面示例 1](1.jpg)
-![页面示例 2](2.jpg)
+![页面示例 1](images/1.jpg)
+![页面示例 2](images/2.jpg)
 
 ## 使用的技术栈
 
@@ -24,6 +24,6 @@
 
 感谢你的支持与使用。
 
-![感谢支持](appreciate.png)
+![感谢支持](images/appreciate.png)
 
 灵感来源于 [DTV](https://github.com/chen-zeong/DTV)。
