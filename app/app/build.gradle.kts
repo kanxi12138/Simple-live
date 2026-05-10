@@ -13,16 +13,43 @@ val tauriProperties = Properties().apply {
     }
 }
 
+val localProperties = Properties().apply {
+    val propFile = file("../local.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     compileSdk = 36
-    namespace = "com.dtv.app"
+    namespace = "www.sp.com"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "com.dtv.app"
+        applicationId = "www.sp.com"
         minSdk = 24
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        create("release") {
+            val storeFilePath = localProperties.getProperty("release.keystore.path")
+            val storePasswordValue = localProperties.getProperty("release.keystore.storePassword")
+            val keyAliasValue = localProperties.getProperty("release.keystore.keyAlias")
+            val keyPasswordValue = localProperties.getProperty("release.keystore.keyPassword")
+
+            if (
+                !storeFilePath.isNullOrBlank()
+                && !storePasswordValue.isNullOrBlank()
+                && !keyAliasValue.isNullOrBlank()
+                && !keyPasswordValue.isNullOrBlank()
+            ) {
+                storeFile = file(storeFilePath)
+                storePassword = storePasswordValue
+                keyAlias = keyAliasValue
+                keyPassword = keyPasswordValue
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -39,6 +66,7 @@ android {
         getByName("release") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
@@ -55,7 +83,7 @@ android {
 }
 
 rust {
-    rootDirRel = "../../.."
+    rootDirRel = "../../web"
 }
 
 dependencies {

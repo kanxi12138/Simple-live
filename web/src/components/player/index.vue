@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="player-page" :class="{ 'web-fs': isInWebFullscreen || isInNativePlayerFullscreen }">
     <button v-if="!isInWebFullscreen" @click="handleClosePlayerClick" class="player-close-btn" title="关闭播放器">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -23,8 +23,10 @@
         <div v-else-if="isLoadingStream" class="loading-player">
           <LoadingDots />
         </div>
-        <div v-else-if="isOfflineError" class="offline-player">
-          <!-- Display StreamerInfo if room details are available -->
+        <div
+          v-else-if="isOfflineError"
+          class="player-container player-container--solo player-container--offline"
+        >
           <StreamerInfo 
             v-if="props.roomId && props.platform"
             :room-id="props.roomId"
@@ -39,16 +41,10 @@
             @details="handleStreamerDetails"
             class="streamer-info-offline"
           />
-          <div class="offline-message">
-            <div class="offline-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M16 16.427A4.002 4.002 0 0 0 12.005 20a4 4 0 0 0-3.995-3.573M12 12V2M8.5 7L7 5.5M15.5 7l1.5-1.5M5.562 10.223l-1.842.511M18.438 10.223l1.842.511M12 2a3.5 3.5 0 0 1 3.5 3.5V12H8.5V5.5A3.5 3.5 0 0 1 12 2z"/>
-                <line x1="1" y1="1" x2="23" y2="23" stroke-width="2"></line> 
-              </svg>
+          <div class="video-container video-container--offline">
+            <div class="offline-placeholder">
+              <span class="offline-placeholder__label">当前主播未开播！</span>
             </div>
-            <h3>😴 获取直播流失败了</h3>
-            <p>主播当前未开播，请稍后再来。</p>
-            <button @click="retryInitialization" class="retry-btn">再试一次</button>
           </div>
         </div>
         <div v-else-if="streamError && !isOfflineError" class="error-player">
@@ -59,7 +55,7 @@
               <line x1="12" y1="16" x2="12.01" y2="16"></line>
             </svg>
           </div>
-          <h3>加载失败</h3>
+          <h3>鍔犺浇澶辫触</h3>
           <p>{{ streamError }}</p>
           <button @click="retryInitialization" class="retry-btn">再试一次</button>
         </div>
@@ -305,7 +301,7 @@ const unlistenDanmakuFn = ref<(() => void) | null>(null);
 
 const isLoadingStream = ref(true);
 const streamError = ref<string | null>(null);
-const isOfflineError = ref(false); // Added to track '主播未开播' state
+const isOfflineError = ref(false); // Added to track '涓绘挱鏈紑鎾? state
 
 // Reactive state for streamer info, initialized by props, potentially updated by internal fetches (for Douyin)
 const playerTitle = ref(props.title);
@@ -335,15 +331,15 @@ if (storedDanmuPreferences) {
 // OS specific states
 const osName = ref<string>('');
 
-// 画质切换相关
-const qualityOptions = ['原画', '高清', '标清'] as const;
+// 鐢昏川鍒囨崲鐩稿叧
+const qualityOptions = ['鍘熺敾', '楂樻竻', '鏍囨竻'] as const;
 
 const resolveStoredQuality = (platform?: StreamingPlatform | null): string => {
   if (!platform) {
-    return '原画';
+    return '鍘熺敾';
   }
   if (typeof window === 'undefined') {
-    return '原画';
+    return '鍘熺敾';
   }
   try {
     const saved = window.localStorage.getItem(`${platform}_preferred_quality`);
@@ -353,7 +349,7 @@ const resolveStoredQuality = (platform?: StreamingPlatform | null): string => {
   } catch (error) {
     console.warn('[Player] Failed to read stored quality preference:', error);
   }
-  return '原画';
+  return '鍘熺敾';
 };
 
 const currentQuality = ref<string>(resolveStoredQuality(props.platform));
@@ -978,7 +974,7 @@ async function mountXgPlayer(
 
   player.on('error', (error: any) => {
     console.error('[Player] xgplayer error:', error);
-    streamError.value = `播放器错误: ${error?.message || error}`;
+    streamError.value = `鎾斁鍣ㄩ敊璇? ${error?.message || error}`;
   });
 
   player.on('enterFullscreen', () => {
@@ -1161,7 +1157,7 @@ async function initializePlayerAndStream(
         streamType: props.streamUrl.includes('.m3u8') ? 'hls' : (props.streamUrl.includes('.flv') ? 'flv' : undefined),
       };
     } else {
-      throw new Error(`不支持的平台: ${pPlatform}`);
+      throw new Error(`涓嶆敮鎸佺殑骞冲彴: ${pPlatform}`);
     }
 
     if (!isActivePlayerInitRun(initRunId)) {
@@ -1255,7 +1251,7 @@ const isOfflineStreamError = (message: string | null | undefined) => {
   return text.includes('主播未开播') || isDouyuOfflineMessage(text);
 };
 
-// 画质切换函数
+// 鐢昏川鍒囨崲鍑芥暟
 const switchQuality = async (quality: string) => {
   if (isQualitySwitching.value) {
     return;
@@ -1286,9 +1282,9 @@ const switchQuality = async (quality: string) => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(`${props.platform}_preferred_quality`, quality);
     }
-    console.log(`[Player] 画质切换完成: ${quality}`);
+    console.log(`[Player] 鐢昏川鍒囨崲瀹屾垚: ${quality}`);
   } catch (error) {
-    console.error('[Player] 画质切换失败:', error);
+    console.error('[Player] 鐢昏川鍒囨崲澶辫触:', error);
     currentQuality.value = previousQuality;
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(`${props.platform}_preferred_quality`, previousQuality);
@@ -1327,9 +1323,9 @@ const switchLine = async (lineKey: string) => {
       throw new Error(`Failed to reload stream for line ${lineKey}`);
     }
     persistLinePreference(props.platform, lineKey);
-    console.log(`[Player] 线路切换完成: ${lineKey}`);
+    console.log(`[Player] 绾胯矾鍒囨崲瀹屾垚: ${lineKey}`);
   } catch (error) {
-    console.error('[Player] 线路切换失败:', error);
+    console.error('[Player] 绾胯矾鍒囨崲澶辫触:', error);
     currentLine.value = previousLine ?? null;
     if (typeof window !== 'undefined' && props.platform) {
       if (previousLine) {
@@ -1345,7 +1341,7 @@ const switchLine = async (lineKey: string) => {
   }
 };
 
-// 初始化画质偏好
+// 鍒濆鍖栫敾璐ㄥ亸濂?
 const initializeQualityPreference = () => {
   currentQuality.value = resolveStoredQuality(props.platform);
 };
@@ -1486,7 +1482,7 @@ onMounted(async () => {
     window.addEventListener('resize', updateWindowWidth, { passive: true });
     window.addEventListener('popstate', handleFullscreenPopState);
   }
-  // 初始化画质偏好
+  // 鍒濆鍖栫敾璐ㄥ亸濂?
   initializeQualityPreference();
   
   if (!props.roomId || props.platform == null) {

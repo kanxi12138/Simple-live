@@ -81,17 +81,12 @@
       :importing="isImportingConfig"
       :app-version="appVersion"
       :status="configStatus"
-      :webdav="webdavConfig"
-      :syncing-webdav="isSyncingWebdav"
       :checking-update="isCheckingUpdate"
       :update-message="updateMessage"
       @close="isSettingsSheetOpen = false"
       @export-config="handleExportConfig"
       @import-config="handleImportConfig"
       @open-github="openGithub"
-      @webdav-change="handleWebdavChange"
-      @webdav-upload="handleWebdavUpload"
-      @webdav-download="handleWebdavDownload"
       @check-update="handleCheckUpdate"
     />
   </div>
@@ -108,7 +103,6 @@ import MobileSettingsSheet from './mobile/MobileSettingsSheet.vue';
 import MobileTopbar from './mobile/MobileTopbar.vue';
 import { buildPortableConfigFileName, createPortableConfigPayload, parsePortableConfigPayload, replacePortableConfigEntries } from './services/configTransfer';
 import { checkLatestRelease, RELEASES_PAGE } from './services/updateChecker';
-import { downloadConfigFromWebDav, uploadConfigToWebDav, type WebDavConfig } from './services/webdav';
 import { useThemeStore } from './stores/theme';
 import { useFollowStore } from './store/followStore';
 import { useCustomM3u8Store } from './store/customM3u8Store';
@@ -147,15 +141,8 @@ const isExportingConfig = ref(false);
 const isImportingConfig = ref(false);
 const configStatus = ref<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null);
 const appVersion = ref('');
-const isSyncingWebdav = ref(false);
 const isCheckingUpdate = ref(false);
 const updateMessage = ref('');
-const webdavConfig = ref<WebDavConfig>({
-  url: '',
-  username: '',
-  password: '',
-  fileName: 'dtv-config.json',
-});
 
 const theme = computed(() => themeStore.getEffectiveTheme());
 const displayedPullDistance = computed(() => {
@@ -534,73 +521,6 @@ const openGithub = async () => {
   await openExternal('https://github.com/kanxi12138/SLR');
 };
 
-const persistWebdavConfig = () => {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem('dtv_webdav_config_v1', JSON.stringify(webdavConfig.value));
-};
-
-const loadWebdavConfig = () => {
-  if (typeof window === 'undefined') return;
-  try {
-    const raw = window.localStorage.getItem('dtv_webdav_config_v1');
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    webdavConfig.value = {
-      url: parsed.url || '',
-      username: parsed.username || '',
-      password: parsed.password || '',
-      fileName: parsed.fileName || 'dtv-config.json',
-    };
-  } catch (error) {
-    console.warn('[App] Failed to load WebDAV config:', error);
-  }
-};
-
-const handleWebdavChange = (payload: { key: 'url' | 'username' | 'password' | 'fileName'; value: string }) => {
-  webdavConfig.value = {
-    ...webdavConfig.value,
-    [payload.key]: payload.value,
-  };
-  persistWebdavConfig();
-};
-
-const handleWebdavUpload = async () => {
-  if (isSyncingWebdav.value || typeof window === 'undefined' || !window.localStorage) return;
-  isSyncingWebdav.value = true;
-  configStatus.value = { tone: 'info', text: '正在上传到 WebDAV...' };
-  try {
-    const payload = createPortableConfigPayload(window.localStorage, {
-      client: 'android',
-      appVersion: appVersion.value || null,
-    });
-    await uploadConfigToWebDav(webdavConfig.value, JSON.stringify(payload, null, 2));
-    configStatus.value = { tone: 'success', text: `宸蹭笂浼犲埌 ${webdavConfig.value.fileName}` };
-  } catch (error) {
-    console.error('[App] WebDAV upload failed:', error);
-    configStatus.value = { tone: 'error', text: 'WebDAV 上传失败，请检查地址或凭据。' };
-  } finally {
-    isSyncingWebdav.value = false;
-  }
-};
-
-const handleWebdavDownload = async () => {
-  if (isSyncingWebdav.value || typeof window === 'undefined' || !window.localStorage) return;
-  isSyncingWebdav.value = true;
-  configStatus.value = { tone: 'info', text: '正在从 WebDAV 下载配置...' };
-  try {
-    const content = await downloadConfigFromWebDav(webdavConfig.value);
-    const payload = parsePortableConfigPayload(content);
-    replacePortableConfigEntries(window.localStorage, payload.entries);
-    configStatus.value = { tone: 'success', text: '已从 ' + webdavConfig.value.fileName + ' 恢复配置，正在刷新。' };
-    window.setTimeout(() => window.location.reload(), 360);
-  } catch (error) {
-    console.error('[App] WebDAV download failed:', error);
-    configStatus.value = { tone: 'error', text: 'WebDAV 下载失败，请检查地址、凭据或远端文件。' };
-  } finally {
-    isSyncingWebdav.value = false;
-  }
-};
-
 const handleCheckUpdate = async () => {
   if (isCheckingUpdate.value) return;
   isCheckingUpdate.value = true;
@@ -622,7 +542,6 @@ const handleCheckUpdate = async () => {
 };
 
 onMounted(async () => {
-  loadWebdavConfig();
   try {
     appVersion.value = await getVersion();
   } catch (error) {

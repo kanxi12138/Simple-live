@@ -1,4 +1,4 @@
-package com.dtv.app
+package www.sp.com
 
 import android.content.pm.ActivityInfo
 import android.os.Bundle
