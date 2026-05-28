@@ -1,0 +1,522 @@
+import Plugin, { POSITIONS } from 'xgplayer/es/plugin/plugin.js';
+
+import {
+  DANMU_DENSITY_OPTIONS,
+  DANMU_OPACITY_MAX,
+  DANMU_OPACITY_MIN,
+  ICONS,
+  getDanmuDensityLabel,
+  sanitizeDanmuArea,
+  sanitizeDanmuDensity,
+  sanitizeDanmuOpacity,
+} from './constants';
+import type { DanmuUserSettings } from './constants';
+
+export class DanmuToggleControl extends Plugin {
+  static override pluginName = 'danmuToggle';
+  static override defaultConfig = {
+    position: POSITIONS.CONTROLS_RIGHT,
+    index: 4,
+    disable: false,
+    getState: (() => true) as () => boolean,
+    onToggle: (async (_value: boolean) => {}) as (value: boolean) => Promise<void> | void,
+  };
+
+  private handleClick: ((event: Event) => void) | null = null;
+  private isActive = true;
+
+  override afterCreate() {
+    if (this.config.disable) {
+      return;
+    }
+    this.isActive = typeof this.config.getState === 'function' ? !!this.config.getState() : true;
+    this.updateState();
+    this.handleClick = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.toggle();
+    };
+    this.bind(['click', 'touchend'], this.handleClick);
+  }
+
+  override destroy() {
+    if (this.handleClick) {
+      this.unbind(['click', 'touchend'], this.handleClick);
+      this.handleClick = null;
+    }
+  }
+
+  override render() {
+    if (this.config.disable) {
+      return '';
+    }
+    return `<xg-icon class="xgplayer-danmu-toggle" title="" role="button" aria-pressed="${this.isActive}">
+      <span class="danmu-toggle-label">弹幕</span>
+      <span class="danmu-toggle-switch">
+        <span class="switch-track"></span>
+        <span class="switch-thumb"></span>
+      </span>
+    </xg-icon>`;
+  }
+
+  private toggle() {
+    this.isActive = !this.isActive;
+    this.updateState();
+    const callback = this.config.onToggle;
+    if (typeof callback === 'function') {
+      callback(this.isActive);
+    }
+  }
+
+  private updateState() {
+    const root = this.root as HTMLElement | null;
+    if (!root) {
+      return;
+    }
+    root.classList.toggle('is-off', !this.isActive);
+    root.setAttribute('aria-pressed', this.isActive ? 'true' : 'false');
+  }
+
+  setState(isActive: boolean) {
+    this.isActive = isActive;
+    this.updateState();
+  }
+}
+
+export class DanmuSettingsControl extends Plugin {
+  static override pluginName = 'danmuSettings';
+  static override defaultConfig = {
+    position: POSITIONS.CONTROLS_RIGHT,
+    index: 4,
+    disable: false,
+    getSettings: (() => ({
+      fontSize: '20px',
+      duration: 10000,
+      area: 0.5,
+      mode: 'scroll',
+      opacity: 1,
+      density: 'medium',
+    })) as () => DanmuUserSettings,
+    onChange: (async (_partial: Partial<DanmuUserSettings>) => {}) as (partial: Partial<DanmuUserSettings>) => Promise<void> | void,
+  };
+
+  private panel: HTMLElement | null = null;
+  private handleToggle: ((event: Event) => void) | null = null;
+  private handleDocumentClick: ((event: MouseEvent) => void) | null = null;
+  private handleHoverEnter: ((event: Event) => void) | null = null;
+  private handleHoverLeave: ((event: Event) => void) | null = null;
+  private hoverCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  private isOpen = false;
+  private currentSettings: DanmuUserSettings = {
+    fontSize: '20px',
+    duration: 10000,
+    area: 0.5,
+    mode: 'scroll',
+    opacity: 1,
+    density: 'medium',
+  };
+  private fontSizeSlider: HTMLInputElement | null = null;
+  private durationSlider: HTMLInputElement | null = null;
+  private areaSlider: HTMLInputElement | null = null;
+  private opacitySlider: HTMLInputElement | null = null;
+  private densityButtons: HTMLButtonElement[] = [];
+
+  override afterCreate() {
+    if (this.config.disable) {
+      return;
+    }
+    this.currentSettings = typeof this.config.getSettings === 'function'
+      ? this.config.getSettings()
+      : this.currentSettings;
+    this.currentSettings.area = sanitizeDanmuArea(this.currentSettings.area);
+    this.currentSettings.opacity = sanitizeDanmuOpacity(this.currentSettings.opacity);
+    this.currentSettings.density = sanitizeDanmuDensity(this.currentSettings.density);
+
+    this.createPanel();
+    this.updateInputs();
+
+    this.handleToggle = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.togglePanel();
+    };
+
+    this.bind(['click', 'touchend'], this.handleToggle);
+
+    if (typeof document !== 'undefined') {
+      this.handleDocumentClick = (event: MouseEvent) => {
+        if (!this.root.contains(event.target as Node)) {
+          this.closePanel();
+        }
+      };
+      document.addEventListener('click', this.handleDocumentClick);
+    }
+
+    this.handleHoverEnter = () => {
+      if (this.hoverCloseTimer) {
+        clearTimeout(this.hoverCloseTimer);
+        this.hoverCloseTimer = null;
+      }
+      this.openPanel();
+    };
+    this.handleHoverLeave = () => {
+      if (this.hoverCloseTimer) {
+        clearTimeout(this.hoverCloseTimer);
+      }
+      this.hoverCloseTimer = setTimeout(() => {
+        this.hoverCloseTimer = null;
+        this.closePanel();
+      }, 220);
+    };
+    this.bind('mouseenter', this.handleHoverEnter);
+    this.bind('mouseleave', this.handleHoverLeave);
+  }
+
+  override destroy() {
+    if (this.handleToggle) {
+      this.unbind(['click', 'touchend'], this.handleToggle);
+      this.handleToggle = null;
+    }
+    if (this.handleDocumentClick) {
+      document.removeEventListener('click', this.handleDocumentClick);
+      this.handleDocumentClick = null;
+    }
+    if (this.handleHoverEnter) {
+      this.unbind('mouseenter', this.handleHoverEnter);
+      this.handleHoverEnter = null;
+    }
+    if (this.handleHoverLeave) {
+      this.unbind('mouseleave', this.handleHoverLeave);
+      this.handleHoverLeave = null;
+    }
+    if (this.hoverCloseTimer) {
+      clearTimeout(this.hoverCloseTimer);
+      this.hoverCloseTimer = null;
+    }
+    (this.root as HTMLElement | null)?.classList.remove('menu-open');
+    this.panel?.remove();
+    this.panel = null;
+    this.fontSizeSlider = null;
+    this.durationSlider = null;
+    this.areaSlider = null;
+    this.opacitySlider = null;
+    this.densityButtons = [];
+  }
+
+  override render() {
+    if (this.config.disable) {
+      return '';
+    }
+    return `<xg-icon class="xgplayer-danmu-settings" title="">
+      ${ICONS.cog}
+    </xg-icon>`;
+  }
+
+  private createPanel() {
+    this.panel = document.createElement('div');
+    this.panel.className = 'xgplayer-danmu-settings-panel';
+    this.panel.innerHTML = `
+      <div class="settings-shell">
+        <div class="settings-body">
+          <div class="settings-row">
+            <label>字体 <span class="settings-value font-size-value">${this.currentSettings.fontSize}</span></label>
+            <input class="danmu-setting-font-range" type="range" min="14" max="30" step="2" value="${parseInt(this.currentSettings.fontSize, 10)}">
+          </div>
+          <div class="settings-row">
+            <label>速度 <span class="settings-value speed-value">${this.formatDurationLabel(this.currentSettings.duration)}</span></label>
+            <input class="danmu-setting-duration-range" type="range" min="3000" max="20000" step="500" value="${this.currentSettings.duration}">
+          </div>
+          <div class="settings-row">
+            <label>显示区域 <span class="settings-value area-value">${this.formatAreaLabel(this.currentSettings.area)}</span></label>
+            <input class="danmu-setting-area-range" type="range" min="0.25" max="0.75" step="0.25" value="${this.currentSettings.area}">
+          </div>
+          <div class="settings-row">
+            <label>透明度 <span class="settings-value opacity-value">${this.formatOpacityLabel(this.currentSettings.opacity)}</span></label>
+            <input class="danmu-setting-opacity-range" type="range" min="${DANMU_OPACITY_MIN}" max="${DANMU_OPACITY_MAX}" step="0.05" value="${this.currentSettings.opacity}">
+          </div>
+          <div class="settings-row">
+            <label>弹幕密度 <span class="settings-value density-value">${this.formatDensityLabel(this.currentSettings.density)}</span></label>
+            <div class="danmu-density-segmented" role="group" aria-label="弹幕密度">
+              ${DANMU_DENSITY_OPTIONS.map((value) => `
+                <button
+                  type="button"
+                  class="danmu-density-option"
+                  data-density="${value}"
+                  aria-pressed="${this.currentSettings.density === value}"
+                >${this.formatDensityLabel(value)}</button>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    this.root.appendChild(this.panel);
+
+    this.panel.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+    this.panel.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+    });
+    this.panel.addEventListener('mousedown', (event) => {
+      event.stopPropagation();
+    });
+    this.panel.addEventListener('touchend', (event) => {
+      event.stopPropagation();
+    });
+
+    this.fontSizeSlider = this.panel.querySelector<HTMLInputElement>('.danmu-setting-font-range');
+    this.durationSlider = this.panel.querySelector<HTMLInputElement>('.danmu-setting-duration-range');
+    this.areaSlider = this.panel.querySelector<HTMLInputElement>('.danmu-setting-area-range');
+    this.opacitySlider = this.panel.querySelector<HTMLInputElement>('.danmu-setting-opacity-range');
+    this.densityButtons = Array.from(this.panel.querySelectorAll<HTMLButtonElement>('.danmu-density-option'));
+
+    const handleRange = (
+      el: HTMLInputElement | null,
+      key: keyof DanmuUserSettings,
+      transform: (value: string) => unknown,
+      displaySelector: string,
+      formatter: (value: number) => string,
+    ) => {
+      const updateDisplay = (value: number) => {
+        const label = this.panel?.querySelector<HTMLSpanElement>(displaySelector);
+        if (label) {
+          label.textContent = formatter(value);
+        }
+      };
+      el?.addEventListener('input', (event) => {
+        const rawValue = (event.target as HTMLInputElement).value;
+        const numericValue = Number(rawValue);
+        updateDisplay(numericValue);
+        const nextValue = transform(rawValue);
+        (this.currentSettings as Record<string, unknown>)[key as string] = nextValue;
+        this.emitChange({ [key]: nextValue } as Partial<DanmuUserSettings>);
+        this.updateSliderVisual(el);
+      });
+      if (el) {
+        updateDisplay(Number(el.value));
+        this.updateSliderVisual(el);
+      }
+    };
+
+    handleRange(
+      this.fontSizeSlider,
+      'fontSize',
+      (value) => `${Math.min(30, Math.max(14, Number(value)))}px`,
+      '.font-size-value',
+      (value) => `${Math.min(30, Math.max(14, value))}px`,
+    );
+
+    handleRange(
+      this.durationSlider,
+      'duration',
+      (value) => {
+        const numeric = Number(value);
+        const clamped = Number.isFinite(numeric) ? Math.min(20000, Math.max(3000, numeric)) : 10000;
+        return clamped;
+      },
+      '.speed-value',
+      (value) => this.formatDurationLabel(value),
+    );
+
+    handleRange(
+      this.areaSlider,
+      'area',
+      (value) => {
+        const numeric = Number(value);
+        return sanitizeDanmuArea(numeric);
+      },
+      '.area-value',
+      (value) => this.formatAreaLabel(value),
+    );
+
+    handleRange(
+      this.opacitySlider,
+      'opacity',
+      (value) => sanitizeDanmuOpacity(Number(value)),
+      '.opacity-value',
+      (value) => this.formatOpacityLabel(value),
+    );
+
+    this.densityButtons.forEach((button) => {
+      const handleDensitySelect = (event: Event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const nextDensity = sanitizeDanmuDensity(button.dataset.density);
+        this.currentSettings.density = nextDensity;
+        this.emitChange({ density: nextDensity });
+        this.updateDensityButtons();
+      };
+      button.addEventListener('click', handleDensitySelect);
+      button.addEventListener('touchend', handleDensitySelect);
+    });
+  }
+
+  private updateSliderVisual(el: HTMLInputElement | null) {
+    if (!el) {
+      return;
+    }
+    const min = Number(el.min) || 0;
+    const max = Number(el.max) || 100;
+    const value = Number(el.value);
+    const clamped = Math.min(max, Math.max(min, value));
+    const percent = max === min ? 0 : ((clamped - min) / (max - min)) * 100;
+    el.style.background = `linear-gradient(90deg, var(--player-accent) ${percent}%, rgba(255, 255, 255, 0.15) ${percent}%)`;
+  }
+
+  private togglePanel() {
+    if (this.isOpen) {
+      this.closePanel();
+    } else {
+      this.openPanel();
+    }
+  }
+
+  private openPanel() {
+    if (!this.panel || this.isOpen) {
+      return;
+    }
+    if (this.hoverCloseTimer) {
+      clearTimeout(this.hoverCloseTimer);
+      this.hoverCloseTimer = null;
+    }
+    this.isOpen = true;
+    this.panel.classList.add('show');
+    this.root.classList.add('menu-open');
+    this.updateInputs();
+  }
+
+  private closePanel() {
+    if (!this.panel) {
+      return;
+    }
+    if (this.hoverCloseTimer) {
+      clearTimeout(this.hoverCloseTimer);
+      this.hoverCloseTimer = null;
+    }
+    this.isOpen = false;
+    this.panel.classList.remove('show');
+    this.root.classList.remove('menu-open');
+  }
+
+  private updateInputs() {
+    if (!this.panel) {
+      return;
+    }
+    if (this.fontSizeSlider) {
+      const numericFont = parseInt(this.currentSettings.fontSize, 10);
+      this.fontSizeSlider.value = String(Math.min(30, Math.max(14, numericFont)));
+      const fontLabel = this.panel.querySelector<HTMLSpanElement>('.font-size-value');
+      if (fontLabel) {
+        fontLabel.textContent = `${Math.min(30, Math.max(14, numericFont))}px`;
+      }
+      this.updateSliderVisual(this.fontSizeSlider);
+    }
+    if (this.durationSlider) {
+      const durationValue = Math.min(20000, Math.max(3000, this.currentSettings.duration));
+      this.durationSlider.value = String(durationValue);
+      const speedLabel = this.panel.querySelector<HTMLSpanElement>('.speed-value');
+      if (speedLabel) {
+        speedLabel.textContent = this.formatDurationLabel(durationValue);
+      }
+      this.updateSliderVisual(this.durationSlider);
+    }
+    if (this.areaSlider) {
+      const areaValue = sanitizeDanmuArea(this.currentSettings.area);
+      this.areaSlider.value = String(areaValue);
+      const areaLabel = this.panel.querySelector<HTMLSpanElement>('.area-value');
+      if (areaLabel) {
+        areaLabel.textContent = this.formatAreaLabel(areaValue);
+      }
+      this.updateSliderVisual(this.areaSlider);
+    }
+    if (this.opacitySlider) {
+      const opacityValue = sanitizeDanmuOpacity(this.currentSettings.opacity);
+      this.opacitySlider.value = String(opacityValue);
+      const opacityLabel = this.panel.querySelector<HTMLSpanElement>('.opacity-value');
+      if (opacityLabel) {
+        opacityLabel.textContent = this.formatOpacityLabel(opacityValue);
+      }
+      this.updateSliderVisual(this.opacitySlider);
+    }
+    this.updateDensityButtons();
+  }
+
+  private formatDurationLabel(value: number): string {
+    const clamped = Math.min(20000, Math.max(3000, value));
+    if (clamped <= 4500) {
+      return '极快';
+    }
+    if (clamped <= 7500) {
+      return '很快';
+    }
+    if (clamped <= 10000) {
+      return '标准';
+    }
+    if (clamped <= 14000) {
+      return '稍慢';
+    }
+    return '慢速';
+  }
+
+  private formatAreaLabel(value: number): string {
+    const clamped = sanitizeDanmuArea(value);
+    if (clamped <= 0.25) {
+      return '上 1/4';
+    }
+    if (clamped <= 0.5) {
+      return '上 1/2';
+    }
+    return '上 3/4';
+  }
+
+  private formatOpacityLabel(value: number): string {
+    const normalized = sanitizeDanmuOpacity(value);
+    return `${Math.round(normalized * 100)}%`;
+  }
+
+  private formatDensityLabel(value: DanmuUserSettings['density']): string {
+    return getDanmuDensityLabel(sanitizeDanmuDensity(value));
+  }
+
+  private updateDensityButtons() {
+    if (!this.panel) {
+      return;
+    }
+    const normalizedDensity = sanitizeDanmuDensity(this.currentSettings.density);
+    const densityLabel = this.panel.querySelector<HTMLSpanElement>('.density-value');
+    if (densityLabel) {
+      densityLabel.textContent = this.formatDensityLabel(normalizedDensity);
+    }
+    this.densityButtons.forEach((button) => {
+      const isActive = button.dataset.density === normalizedDensity;
+      button.classList.toggle('is-active', isActive);
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  }
+
+  private emitChange(partial: Partial<DanmuUserSettings>) {
+    const callback = this.config.onChange;
+    if (typeof callback === 'function') {
+      callback(partial);
+    }
+  }
+
+  setSettings(settings: Partial<DanmuUserSettings>) {
+    const normalized: Partial<DanmuUserSettings> = { ...settings };
+    if (typeof normalized.area === 'number') {
+      normalized.area = sanitizeDanmuArea(normalized.area);
+    }
+    if (typeof normalized.opacity === 'number') {
+      normalized.opacity = sanitizeDanmuOpacity(normalized.opacity);
+    }
+    if (typeof normalized.density !== 'undefined') {
+      normalized.density = sanitizeDanmuDensity(normalized.density);
+    }
+    this.currentSettings = {
+      ...this.currentSettings,
+      ...normalized,
+    };
+    this.updateInputs();
+  }
+}
