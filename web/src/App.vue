@@ -552,7 +552,7 @@ const handleCheckUpdate = async () => {
     const result = await fetchLatestReleaseInfo();
     appVersion.value = result.currentVersion || appVersion.value;
     if (!result.hasUpdate) {
-      updateMessage.value = '当前已经是最新版本 ' + (result.currentVersion || appVersion.value || '4.9.0') + '。';
+      updateMessage.value = '当前已经是最新版本 ' + (result.currentVersion || appVersion.value || '5.0.0') + '。';
       return;
     }
     if (!result.apkAsset) {
@@ -649,7 +649,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(circle at top, var(--mobile-shell-glow, rgba(37, 99, 235, 0.16)), transparent 24%),
+    linear-gradient(180deg, rgba(255, 253, 249, 0.62), transparent 28%),
+    radial-gradient(circle at 50% -12%, var(--mobile-shell-glow, rgba(216, 100, 58, 0.12)), transparent 30%),
     var(--mobile-shell-bg, var(--bg-primary));
 }
 
@@ -707,7 +708,7 @@ onBeforeUnmount(() => {
   background: var(--mobile-surface-strong, rgba(255, 255, 255, 0.96));
   color: var(--mobile-text-primary, var(--text-primary));
   border: 1px solid var(--mobile-border, rgba(148, 163, 184, 0.22));
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.16);
+  box-shadow: var(--shadow-md);
   transform-origin: center top;
   pointer-events: none;
   transition:
@@ -723,8 +724,8 @@ onBeforeUnmount(() => {
 }
 
 .pull-refresh-indicator--armed {
-  background: var(--mobile-pill-active-bg, rgba(34, 197, 94, 0.16));
-  border-color: var(--mobile-pill-active-border, rgba(34, 197, 94, 0.34));
+  background: var(--mobile-pill-active-bg, rgba(216, 100, 58, 0.14));
+  border-color: var(--mobile-pill-active-border, rgba(216, 100, 58, 0.34));
 }
 
 .pull-refresh-indicator--refreshing {
@@ -759,11 +760,11 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 35;
-  min-height: 52px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+  padding: max(12px, env(safe-area-inset-top)) 14px 10px;
   background: var(--mobile-topbar-bg, rgba(2, 6, 23, 0.86));
   color: var(--mobile-topbar-text, var(--text-primary));
   backdrop-filter: blur(16px);
@@ -772,10 +773,10 @@ onBeforeUnmount(() => {
 }
 
 .player-back-btn {
-  min-width: 56px;
-  min-height: 34px;
+  min-width: 60px;
+  min-height: 40px;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--mobile-icon-btn-bg, rgba(148, 163, 184, 0.16));
   color: var(--mobile-topbar-text, var(--text-primary));
   font-weight: 700;

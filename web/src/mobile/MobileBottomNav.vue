@@ -45,9 +45,9 @@ const items = [
   z-index: 45;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   padding:
-    10px 12px
+    10px 14px
     calc(var(--mobile-bottom-nav-safe-gap) + env(safe-area-inset-bottom));
   background: var(--mobile-topbar-bg);
   backdrop-filter: blur(18px);
@@ -57,9 +57,9 @@ const items = [
 }
 
 .nav-item {
-  min-height: 54px;
-  border: none;
-  border-radius: 14px;
+  min-height: 56px;
+  border: 1px solid transparent;
+  border-radius: 16px;
   background: transparent;
   color: var(--mobile-text-secondary);
   display: inline-flex;
@@ -75,6 +75,8 @@ const items = [
 .nav-item.active {
   color: var(--mobile-pill-active-text);
   background: var(--mobile-pill-active-bg);
+  border-color: var(--mobile-pill-active-border);
+  box-shadow: inset 0 1px 0 rgba(255, 253, 249, 0.4);
 }
 
 .nav-item:active {

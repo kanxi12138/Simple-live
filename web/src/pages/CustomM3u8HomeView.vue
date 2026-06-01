@@ -113,7 +113,7 @@ const playEntry = (id: string) => {
 .editor-grid, .entry-list { display: grid; gap: 10px; }
 input, textarea { width: 100%; border: 1px solid var(--mobile-border, var(--glass-border)); border-radius: 12px; background: transparent; color: var(--text-primary); padding: 10px 12px; }
 .editor-actions, .entry-actions { display: flex; gap: 8px; margin-top: 10px; }
-button { min-height: 38px; padding: 0 14px; border: none; border-radius: 12px; background: #2563eb; color: #fff; font-weight: 700; }
+button { min-height: 38px; padding: 0 14px; border: none; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 700; }
 button.secondary { background: rgba(148, 163, 184, 0.18); color: var(--text-primary); }
 button.danger { background: rgba(239, 68, 68, 0.84); }
 .entry-card { display: grid; gap: 10px; }

@@ -105,7 +105,7 @@
 
 .avatar-container.is-live .avatar-image {
   border-color: #fff;
-  box-shadow: 0 0 15px rgba(139, 92, 246, 0.4);
+  box-shadow: 0 0 15px rgba(216, 100, 58, 0.28);
 }
 
 @keyframes rotate-border {

@@ -1,7 +1,7 @@
 {
   "name": "dtv",
   "private": true,
-  "version": "4.9.0",
+  "version": "5.0.0",
   "type": "module",
   "scripts": {
     "android:sync": "powershell -ExecutionPolicy Bypass -File ..\\scripts\\sync-core.ps1",

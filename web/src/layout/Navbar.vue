@@ -1620,7 +1620,7 @@ const tryEnterRoom = (roomId: string) => {
 }
 
 .config-menu__status--info {
-  color: #2563eb;
+  color: var(--accent);
 }
 
 .config-menu__status--success {
@@ -1647,7 +1647,7 @@ const tryEnterRoom = (roomId: string) => {
 }
 
 .config-menu__import-textarea:focus {
-  border-color: rgba(59, 130, 246, 0.4);
+  border-color: var(--accent);
 }
 
 .config-menu__import-actions {
@@ -1662,13 +1662,13 @@ const tryEnterRoom = (roomId: string) => {
 }
 
 .config-menu__action--confirm {
-  background: linear-gradient(180deg, rgba(37, 99, 235, 0.94), rgba(29, 78, 216, 0.98));
+  background: var(--accent-gradient);
   color: #fff;
-  border-color: rgba(37, 99, 235, 0.3);
+  border-color: var(--mobile-pill-active-border);
 }
 
 .config-menu__action--confirm:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(59, 130, 246, 1), rgba(37, 99, 235, 0.98));
+  background: linear-gradient(180deg, var(--accent), var(--accent-hover));
 }
 
 .config-menu__action {
@@ -1685,8 +1685,8 @@ const tryEnterRoom = (roomId: string) => {
 
 .config-menu__action:hover:not(:disabled) {
   transform: translateY(-1px);
-  border-color: rgba(59, 130, 246, 0.3);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(239, 246, 255, 0.96));
+  border-color: var(--mobile-pill-active-border);
+  background: var(--mobile-surface-strong);
 }
 
 .config-menu__action:disabled {
@@ -1937,7 +1937,7 @@ const tryEnterRoom = (roomId: string) => {
 }
 
 .live-status-dot.is-live {
-  background: #22c55e;
+  background: var(--status-live);
 }
 
 .result-line-2-main {
@@ -2119,8 +2119,8 @@ const tryEnterRoom = (roomId: string) => {
 }
 
 :global([data-theme='dark']) .config-menu__action:hover:not(:disabled) {
-  background: rgba(37, 99, 235, 0.18);
-  border-color: rgba(96, 165, 250, 0.35);
+  background: var(--mobile-pill-active-bg);
+  border-color: var(--mobile-pill-active-border);
 }
 
 :global([data-theme='dark']) .config-menu__import-textarea {
@@ -2130,16 +2130,16 @@ const tryEnterRoom = (roomId: string) => {
 }
 
 :global([data-theme='dark']) .config-menu__import-textarea:focus {
-  border-color: rgba(96, 165, 250, 0.4);
+  border-color: var(--accent);
 }
 
 :global([data-theme='dark']) .config-menu__action--confirm {
-  background: linear-gradient(180deg, rgba(37, 99, 235, 0.85), rgba(29, 78, 216, 0.9));
+  background: var(--accent-gradient);
   color: #fff;
 }
 
 :global([data-theme='dark']) .config-menu__action--confirm:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(59, 130, 246, 0.9), rgba(37, 99, 235, 0.88));
+  background: linear-gradient(180deg, var(--accent), var(--accent-hover));
 }
 
 .nav-icon-btn:hover {

@@ -367,6 +367,9 @@ const selectAnchor = (result: SearchResultItem) => {
   background: var(--mobile-surface-strong);
   color: var(--mobile-text-primary);
   overflow: hidden;
+  border: 1px solid var(--mobile-border);
+  border-bottom: none;
+  box-shadow: var(--mobile-sheet-shadow);
 }
 
 .sheet-header {
@@ -377,7 +380,8 @@ const selectAnchor = (result: SearchResultItem) => {
 }
 
 .sheet-header strong {
-  font-size: 16px;
+  font-size: 18px;
+  line-height: 1.2;
 }
 
 .sheet-header p {
@@ -388,7 +392,7 @@ const selectAnchor = (result: SearchResultItem) => {
 
 .close-btn,
 .submit-btn {
-  border: none;
+  border: 1px solid var(--mobile-border);
   border-radius: 12px;
   background: var(--mobile-icon-btn-bg);
   color: var(--mobile-text-primary);
@@ -421,6 +425,7 @@ const selectAnchor = (result: SearchResultItem) => {
   background: var(--mobile-pill-bg);
   color: var(--mobile-text-secondary);
   font-weight: 700;
+  font-size: 12px;
 }
 
 .platform-pill.active {
@@ -439,9 +444,9 @@ const selectAnchor = (result: SearchResultItem) => {
   min-width: 0;
   min-height: 48px;
   padding: 0 16px;
-  border-radius: 14px;
+  border-radius: 15px;
   border: 1px solid var(--mobile-border);
-  background: var(--mobile-surface-soft);
+  background: var(--mobile-surface-muted);
   color: var(--mobile-text-primary);
   font-size: 15px;
 }
@@ -479,13 +484,13 @@ const selectAnchor = (result: SearchResultItem) => {
 .result-item {
   width: 100%;
   border: 1px solid var(--mobile-border);
-  border-radius: 16px;
+  border-radius: 14px;
   padding: 12px;
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 12px;
   gap: 12px;
   align-items: center;
-  background: var(--mobile-surface-muted);
+  background: var(--mobile-surface);
   color: var(--mobile-text-primary);
   text-align: left;
 }
@@ -493,7 +498,7 @@ const selectAnchor = (result: SearchResultItem) => {
 .avatar {
   width: 44px;
   height: 44px;
-  border-radius: 14px;
+  border-radius: 13px;
   object-fit: cover;
   background: var(--mobile-icon-btn-bg);
 }
@@ -536,7 +541,7 @@ const selectAnchor = (result: SearchResultItem) => {
 }
 
 .status-dot.live {
-  background: #22c55e;
+  background: var(--status-live);
 }
 
 .sheet-fade-enter-active,
