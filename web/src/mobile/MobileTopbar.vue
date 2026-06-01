@@ -85,11 +85,12 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
   position: sticky;
   top: 0;
   z-index: 35;
-  padding: max(12px, env(safe-area-inset-top)) 12px 10px;
+  padding: max(14px, env(safe-area-inset-top)) 14px 12px;
   background: var(--mobile-topbar-bg);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   border-bottom: 1px solid var(--mobile-topbar-border);
+  box-shadow: 0 8px 24px rgba(69, 48, 30, 0.06);
 }
 
 .topbar-main {
@@ -107,16 +108,16 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
 }
 
 .brand-mark {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 900;
-  color: #eff6ff;
-  background: linear-gradient(135deg, #2563eb, #8b5cf6);
-  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.32);
+  color: #fff7ef;
+  background: linear-gradient(135deg, #e5774d, #bd4d29);
+  box-shadow: 0 10px 22px rgba(216, 100, 58, 0.22);
 }
 
 .brand-copy {
@@ -127,8 +128,9 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
 
 .brand-copy strong {
   color: var(--mobile-topbar-text);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.2;
+  letter-spacing: 0;
 }
 
 .brand-copy span {
@@ -147,9 +149,9 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
 }
 
 .icon-btn {
-  width: 40px;
-  height: 40px;
-  border: none;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--mobile-border);
   border-radius: 12px;
   background: var(--mobile-icon-btn-bg);
   color: var(--mobile-topbar-text);
@@ -162,7 +164,7 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding-top: 12px;
+  padding-top: 14px;
   scrollbar-width: none;
 }
 
@@ -173,8 +175,8 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
 .platform-pill {
   flex: 0 0 auto;
   min-width: 66px;
-  min-height: 34px;
-  padding: 0 14px;
+  min-height: 36px;
+  padding: 0 15px;
   border: 1px solid var(--mobile-border);
   border-radius: 999px;
   background: var(--mobile-pill-bg);
@@ -187,16 +189,17 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
   background: var(--mobile-pill-active-bg);
   color: var(--mobile-pill-active-text);
   border-color: var(--mobile-pill-active-border);
+  box-shadow: inset 0 0 0 1px rgba(216, 100, 58, 0.08);
 }
 
 .mobile-topbar--light .brand-mark {
-  color: #eff6ff;
-  background: linear-gradient(135deg, #22c55e, #0ea5e9);
-  box-shadow: 0 10px 22px rgba(34, 197, 94, 0.24);
+  color: #fff7ef;
+  background: linear-gradient(135deg, #e5774d, #bd4d29);
+  box-shadow: 0 10px 22px rgba(216, 100, 58, 0.22);
 }
 
 .mobile-topbar--dark .brand-mark {
-  background: linear-gradient(135deg, #2563eb, #8b5cf6);
-  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.32);
+  background: linear-gradient(135deg, #ed8158, #c95f39);
+  box-shadow: 0 10px 22px rgba(237, 129, 88, 0.24);
 }
 </style>

@@ -179,6 +179,9 @@ const handleConfirmImport = () => {
   padding: 18px 16px calc(16px + env(safe-area-inset-bottom));
   background: var(--mobile-surface);
   color: var(--mobile-text-primary);
+  border: 1px solid var(--mobile-border);
+  border-bottom: none;
+  box-shadow: var(--mobile-sheet-shadow);
 }
 
 .sheet-header {
@@ -189,7 +192,8 @@ const handleConfirmImport = () => {
 }
 
 .sheet-header strong {
-  font-size: 16px;
+  font-size: 18px;
+  line-height: 1.2;
 }
 
 .sheet-header p {
@@ -200,9 +204,9 @@ const handleConfirmImport = () => {
 
 .close-btn {
   min-width: 56px;
-  min-height: 36px;
-  border: none;
-  border-radius: 10px;
+  min-height: 40px;
+  border: 1px solid var(--mobile-border);
+  border-radius: 12px;
   background: var(--mobile-icon-btn-bg);
   color: var(--mobile-text-primary);
   font-weight: 700;
@@ -218,8 +222,8 @@ const handleConfirmImport = () => {
   width: 100%;
   padding: 14px;
   border: 1px solid var(--mobile-border);
-  border-radius: 16px;
-  background: var(--mobile-surface-muted);
+  border-radius: 14px;
+  background: var(--mobile-surface-strong);
   color: var(--mobile-text-primary);
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
@@ -249,8 +253,8 @@ const handleConfirmImport = () => {
   margin-top: 14px;
   padding: 14px;
   border: 1px solid var(--mobile-border);
-  border-radius: 16px;
-  background: var(--mobile-surface-muted);
+  border-radius: 14px;
+  background: var(--mobile-surface-strong);
 }
 
 .action-row {
@@ -289,11 +293,11 @@ const handleConfirmImport = () => {
 .dialog {
   width: min(320px, calc(100vw - 40px));
   border: 1px solid var(--mobile-border);
-  border-radius: 18px;
+  border-radius: 16px;
   padding: 18px;
   background: var(--mobile-surface-strong, var(--mobile-surface));
   color: var(--mobile-text-primary);
-  box-shadow: 0 18px 36px rgba(2, 6, 23, 0.24);
+  box-shadow: var(--shadow-lg);
 }
 
 .dialog-title {
@@ -335,15 +339,15 @@ const handleConfirmImport = () => {
 }
 
 .status--info {
-  color: #93c5fd;
+  color: var(--accent);
 }
 
 .status--success {
-  color: #86efac;
+  color: var(--success-color);
 }
 
 .status--error {
-  color: #fda4af;
+  color: var(--error-color);
 }
 
 .sheet-fade-enter-active,
@@ -406,6 +410,6 @@ const handleConfirmImport = () => {
 }
 
 .import-textarea:focus {
-  border-color: var(--mobile-icon-btn-bg, rgba(37, 99, 235, 0.5));
+  border-color: var(--accent);
 }
 </style>

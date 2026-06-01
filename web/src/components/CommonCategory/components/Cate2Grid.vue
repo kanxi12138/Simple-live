@@ -106,16 +106,16 @@ const isSubscribed = (cate2: Category2) => props.isSubscribed?.(cate2) ?? false
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(34, 197, 94, 0.22);
-  color: #4ade80;
+  background: var(--mobile-pill-active-bg);
+  color: var(--accent);
   font-size: 11px;
   line-height: 1;
   font-weight: 800;
 }
 
 .cate2-subscribe-btn.is-active {
-  background: rgba(34, 197, 94, 0.94);
-  color: #062814;
+  background: var(--accent);
+  color: #ffffff;
 }
 
 :root[data-theme="light"] .cate2-chip {
@@ -131,12 +131,12 @@ const isSubscribed = (cate2: Category2) => props.isSubscribed?.(cate2) ?? false
 }
 
 :root[data-theme="light"] .cate2-subscribe-btn {
-  background: rgba(34, 197, 94, 0.12);
-  color: #15803d;
+  background: var(--mobile-pill-active-bg);
+  color: var(--accent);
 }
 
 :root[data-theme="light"] .cate2-subscribe-btn.is-active {
-  background: #22c55e;
+  background: var(--accent);
   color: #ffffff;
 }
 </style>

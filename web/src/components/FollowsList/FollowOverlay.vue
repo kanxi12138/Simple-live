@@ -331,8 +331,8 @@ const handleSelect = (s: FollowedStreamer) => {
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 @keyframes refreshSuccess {
-  0% { border-color: #22c55e; color: #22c55e; }
-  80% { border-color: #22c55e; color: #22c55e; }
+  0% { border-color: var(--accent); color: var(--accent); }
+  80% { border-color: var(--accent); color: var(--accent); }
   100% { border-color: var(--border-color); color: var(--primary-text); }
 }
 

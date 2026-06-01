@@ -56,6 +56,8 @@ const emit = defineEmits<{
   background: var(--mobile-surface);
   color: var(--mobile-text-primary);
   overflow: hidden;
+  border: 1px solid var(--mobile-border);
+  border-bottom: none;
   box-shadow: var(--mobile-sheet-shadow);
 }
 
@@ -70,7 +72,8 @@ const emit = defineEmits<{
 
 .sheet-header strong {
   display: block;
-  font-size: 16px;
+  font-size: 18px;
+  line-height: 1.2;
 }
 
 .sheet-header p {
@@ -81,9 +84,9 @@ const emit = defineEmits<{
 
 .close-btn {
   min-width: 56px;
-  min-height: 36px;
-  border: none;
-  border-radius: 10px;
+  min-height: 40px;
+  border: 1px solid var(--mobile-border);
+  border-radius: 12px;
   background: var(--mobile-icon-btn-bg);
   color: var(--mobile-text-primary);
   font-weight: 700;
@@ -91,7 +94,7 @@ const emit = defineEmits<{
 
 .sheet-body {
   overflow: auto;
-  padding: 0 8px 12px;
+  padding: 10px 10px 14px;
   max-height: calc(min(84vh, 920px) - 80px);
 }
 

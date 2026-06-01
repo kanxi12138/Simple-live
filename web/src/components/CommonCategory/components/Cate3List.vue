@@ -105,8 +105,8 @@ const isSubscribed = (cate3: Category3) => props.isSubscribed?.(cate3) ?? false;
   align-items: center;
   justify-content: center;
   padding: 0;
-  background: rgba(34, 197, 94, 0.18);
-  color: #4ade80;
+  background: var(--mobile-pill-active-bg);
+  color: var(--accent);
   font-size: 13px;
   line-height: 1;
   font-weight: 700;
@@ -116,12 +116,12 @@ const isSubscribed = (cate3: Category3) => props.isSubscribed?.(cate3) ?? false;
 
 .cate3-subscribe-btn:hover {
   transform: scale(1.05);
-  background: rgba(34, 197, 94, 0.26);
+  background: var(--mobile-pill-active-bg);
 }
 
 .cate3-subscribe-btn.is-active {
-  background: rgba(59, 130, 246, 0.18);
-  color: #60a5fa;
+  background: var(--mobile-pill-active-bg);
+  color: var(--accent);
 }
 
 .loading-cate3 {

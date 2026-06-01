@@ -435,8 +435,8 @@ defineExpose({
 
 .live-grid-scroll-area {
   display: block;
-  padding: 6px 8px;
-  --card-radius: 12px;
+  padding: 8px 10px 14px;
+  --card-radius: 14px;
 }
 
 .live-grid-scroll-area::-webkit-scrollbar {
@@ -451,8 +451,8 @@ defineExpose({
 .live-grid-common {
   display: grid;
   grid-template-columns: repeat(var(--items-per-row, 1), minmax(0, 1fr));
-  gap: 10px 10px;
-  margin-bottom: 10px;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .load-more-sentinel {
@@ -467,7 +467,7 @@ defineExpose({
 }
 
 .card-shadow-wrapper:hover {
-  transform: translateY(-4px);
+  transform: translateY(-2px);
 }
 
 .card-shadow-wrapper.hover-paused,
@@ -476,23 +476,27 @@ defineExpose({
 }
 
 .streamer-card-common {
-  background: var(--hover-bg);
+  background: var(--mobile-surface, var(--card-bg));
   border-radius: var(--card-radius);
   display: flex;
   flex-direction: column;
   cursor: pointer;
-  border: 1px solid var(--glass-border);
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  border: 1px solid var(--mobile-border, var(--glass-border));
+  box-shadow: var(--shadow-low);
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   padding: 0;
+  overflow: hidden;
 }
 
 .streamer-card-common:hover {
-  background: var(--hover-bg);
+  background: var(--mobile-surface-strong, var(--card-bg));
+  border-color: var(--mobile-pill-active-border, var(--accent));
+  box-shadow: var(--shadow-md);
 }
 
 :global(:root:not([data-theme="light"])) .streamer-card-common {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--mobile-surface-muted);
+  border-color: var(--mobile-border);
 }
 
 .card-preview-common {
@@ -518,7 +522,7 @@ defineExpose({
 .card-overlay-gradient {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to top, rgba(0,0,0,0.5) 0%, transparent 40%);
+  background: linear-gradient(to top, rgba(37, 31, 26, 0.46) 0%, transparent 42%);
   pointer-events: none;
 }
 
@@ -526,7 +530,7 @@ defineExpose({
   position: absolute;
   top: 8px;
   right: 10px;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(37, 31, 26, 0.58);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   color: white;
@@ -554,7 +558,7 @@ defineExpose({
 .streamer-avatar-common {
   width: 38px;
   height: 38px;
-  border-radius: 50%;
+  border-radius: 13px;
   object-fit: cover;
   border: 1.5px solid var(--border-color);
   transition: border-color 0.3s ease;
