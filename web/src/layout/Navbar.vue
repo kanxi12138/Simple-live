@@ -374,16 +374,6 @@ interface DouyinApiStreamInfo {
   web_rid?: string | null;
 }
 
-interface DouyinSearchLiveItem {
-  web_rid: string;
-  room_id: string;
-  title: string;
-  nickname: string;
-  avatar: string;
-  is_live: boolean;
-  status: number;
-}
-
 interface HuyaAnchorItem {
   room_id: string;
   avatar: string;
@@ -889,8 +879,6 @@ const openGithub = async () => {
 let searchTimeout: number | null = null;
 
 const isPureNumeric = (value: string): boolean => /^\d+$/.test(value);
-const isLikelyDouyinDirectQuery = (value: string): boolean => isPureNumeric(value) || /douyin\.com\//i.test(value);
-
 const resetSearchState = () => {
   if (searchTimeout) {
     clearTimeout(searchTimeout);
@@ -967,44 +955,25 @@ const performDouyinIdSearch = async (userInputRoomId: string) => {
   searchError.value = null;
   isLoadingSearch.value = true;
   try {
-    if (isLikelyDouyinDirectQuery(userInputRoomId)) {
-      const payloadData = { args: { room_id_str: userInputRoomId } };
-      const douyinInfo = await invoke<DouyinApiStreamInfo>('fetch_douyin_streamer_info', {
-        payload: payloadData,
-      });
-      if (douyinInfo?.anchor_name) {
-        const isLive = douyinInfo.status === 2;
-        const webId = (douyinInfo as any).web_rid ?? userInputRoomId;
-        searchResults.value = [{
-          platform: Platform.DOUYIN,
-          roomId: webId,
-          webId,
-          userName: douyinInfo.anchor_name || '抖音主播',
-          roomTitle: douyinInfo.title || null,
-          avatar: douyinInfo.avatar || null,
-          liveStatus: isLive,
-          rawStatus: douyinInfo.status,
-        }];
-      } else {
-        searchError.value = douyinInfo?.error_message ? '搜索失败，请重试。' : null;
-      }
+    const payloadData = { args: { room_id_str: userInputRoomId } };
+    const douyinInfo = await invoke<DouyinApiStreamInfo>('fetch_douyin_streamer_info', {
+      payload: payloadData,
+    });
+    if (douyinInfo?.anchor_name) {
+      const isLive = douyinInfo.status === 2;
+      const webId = douyinInfo.web_rid ?? userInputRoomId;
+      searchResults.value = [{
+        platform: Platform.DOUYIN,
+        roomId: webId,
+        webId,
+        userName: douyinInfo.anchor_name || '抖音主播',
+        roomTitle: douyinInfo.title || null,
+        avatar: douyinInfo.avatar || null,
+        liveStatus: isLive,
+        rawStatus: douyinInfo.status,
+      }];
     } else {
-      const items = await invoke<DouyinSearchLiveItem[]>('search_douyin_live_rooms', {
-        keyword: userInputRoomId,
-        page: 1,
-      });
-      if (Array.isArray(items) && items.length > 0) {
-        searchResults.value = items.map((item) => ({
-          platform: Platform.DOUYIN,
-          roomId: item.web_rid || item.room_id,
-          webId: item.web_rid || item.room_id,
-          userName: item.nickname || '抖音主播',
-          roomTitle: item.title || null,
-          avatar: item.avatar || null,
-          liveStatus: item.is_live,
-          rawStatus: item.status,
-        }));
-      }
+      searchError.value = douyinInfo?.error_message ? '搜索失败，请重试。' : null;
     }
   } catch (e) {
     searchError.value = '搜索失败，请重试。';
