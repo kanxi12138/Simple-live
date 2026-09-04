@@ -14,7 +14,11 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -32,8 +36,18 @@ private const val HEARTBEAT_INTERVAL_MS = 45_000L
 private const val PACKET_HEADER_SIZE = 12
 private const val MIN_PACKET_BODY_SIZE = 9
 
+private data class BackgroundPlaybackConfig(
+  val streamUrl: String,
+  val streamType: String,
+  val title: String,
+  val anchorName: String,
+)
+
 class MainActivity : TauriActivity() {
   private var playerWebView: WebView? = null
+  private var isImmersiveFullscreen = false
+  private var backgroundPlaybackConfig: BackgroundPlaybackConfig? = null
+  private var isBackgroundPlaybackActive = false
   private lateinit var backPressedCallback: OnBackPressedCallback
   private val douyuDanmakuBridge = DouyuDanmakuBridge()
 
@@ -73,7 +87,34 @@ class MainActivity : TauriActivity() {
 
   override fun onDestroy() {
     douyuDanmakuBridge.stop()
+    if (isFinishing) {
+      stopBackgroundPlayback()
+    }
     super.onDestroy()
+  }
+
+  override fun onStart() {
+    super.onStart()
+    if (isBackgroundPlaybackActive) {
+      stopBackgroundPlayback()
+      dispatchWebPlayerCommand("__DTV_RESUME_WEB_PLAYER__")
+    }
+  }
+
+  override fun onStop() {
+    val config = backgroundPlaybackConfig
+    if (config != null && !isFinishing && !isChangingConfigurations) {
+      dispatchWebPlayerCommand("__DTV_PAUSE_WEB_PLAYER__")
+      startBackgroundPlayback(config)
+    }
+    super.onStop()
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (hasFocus && isImmersiveFullscreen) {
+      hideSystemBars()
+    }
   }
 
   override fun onWebViewCreate(webView: WebView) {
@@ -83,7 +124,9 @@ class MainActivity : TauriActivity() {
     webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
     webView.settings.allowFileAccessFromFileURLs = true
     webView.settings.allowUniversalAccessFromFileURLs = true
+    webView.settings.mediaPlaybackRequiresUserGesture = false
     webView.addJavascriptInterface(OrientationBridge(), "DTVOrientation")
+    webView.addJavascriptInterface(BackgroundAudioBridge(), "DTVBackgroundAudio")
     webView.addJavascriptInterface(UpdateBridge(), "DTVUpdate")
     webView.addJavascriptInterface(DebugBridge(), "DTVDebug")
     webView.addJavascriptInterface(douyuDanmakuBridge, "DTVDouyuDanmaku")
@@ -95,18 +138,117 @@ class MainActivity : TauriActivity() {
     backPressedCallback.isEnabled = true
   }
 
+  private fun enterImmersiveFullscreen() {
+    isImmersiveFullscreen = true
+    hideSystemBars()
+  }
+
+  private fun exitImmersiveFullscreen() {
+    isImmersiveFullscreen = false
+    WindowCompat.getInsetsController(window, window.decorView)
+      .show(WindowInsetsCompat.Type.systemBars())
+  }
+
+  private fun hideSystemBars() {
+    val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+    insetsController.systemBarsBehavior =
+      WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    insetsController.hide(WindowInsetsCompat.Type.systemBars())
+  }
+
+  private fun dispatchWebPlayerCommand(commandName: String) {
+    val script = "window.$commandName && window.$commandName();"
+    playerWebView?.post {
+      playerWebView?.evaluateJavascript(script, null)
+    }
+  }
+
+  private fun startBackgroundPlayback(config: BackgroundPlaybackConfig) {
+    val serviceIntent = Intent(this, BackgroundPlaybackService::class.java).apply {
+      action = ACTION_PLAY_BACKGROUND
+      putExtra(EXTRA_STREAM_URL, config.streamUrl)
+      putExtra(EXTRA_STREAM_TYPE, config.streamType)
+      putExtra(EXTRA_TITLE, config.title)
+      putExtra(EXTRA_ANCHOR_NAME, config.anchorName)
+    }
+    try {
+      ContextCompat.startForegroundService(this, serviceIntent)
+      isBackgroundPlaybackActive = true
+    } catch (error: RuntimeException) {
+      isBackgroundPlaybackActive = false
+      Log.e("BackgroundPlayback", "Unable to start service", error)
+    }
+  }
+
+  private fun stopBackgroundPlayback() {
+    stopService(Intent(this, BackgroundPlaybackService::class.java))
+    isBackgroundPlaybackActive = false
+  }
+
   private inner class OrientationBridge {
     @JavascriptInterface
-    fun setLandscape() {
+    fun enterLandscapeFullscreen() {
       runOnUiThread {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        enterImmersiveFullscreen()
       }
     }
 
     @JavascriptInterface
-    fun setPortrait() {
+    fun enterPortraitFullscreen() {
       runOnUiThread {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        enterImmersiveFullscreen()
+      }
+    }
+
+    @JavascriptInterface
+    fun exitFullscreen() {
+      runOnUiThread {
+        exitImmersiveFullscreen()
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+      }
+    }
+  }
+
+  private inner class BackgroundAudioBridge {
+    @JavascriptInterface
+    fun enable(
+      streamUrl: String?,
+      streamType: String?,
+      title: String?,
+      anchorName: String?,
+    ) {
+      update(streamUrl, streamType, title, anchorName)
+    }
+
+    @JavascriptInterface
+    fun update(
+      streamUrl: String?,
+      streamType: String?,
+      title: String?,
+      anchorName: String?,
+    ) {
+      val normalizedUrl = streamUrl?.trim().orEmpty()
+      val scheme = Uri.parse(normalizedUrl).scheme?.lowercase()
+      if (normalizedUrl.isEmpty() || (scheme != "http" && scheme != "https")) {
+        Log.e("BackgroundPlayback", "Rejected invalid stream URL")
+        return
+      }
+      val normalizedType = if (streamType == "hls") "hls" else "flv"
+      backgroundPlaybackConfig = BackgroundPlaybackConfig(
+        streamUrl = normalizedUrl,
+        streamType = normalizedType,
+        title = title?.trim().orEmpty(),
+        anchorName = anchorName?.trim().orEmpty(),
+      )
+    }
+
+    @JavascriptInterface
+    fun disable() {
+      backgroundPlaybackConfig = null
+      runOnUiThread {
+        stopBackgroundPlayback()
       }
     }
   }

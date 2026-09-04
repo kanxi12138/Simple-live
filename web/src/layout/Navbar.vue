@@ -47,45 +47,8 @@
     </div>
     </div>
 
-    <div
-      v-if="playerIsland.visible && isPlayerRoute"
-      class="navbar-player-island"
-      data-tauri-drag-region="false"
-    >
-      <div class="navbar-player-island__left">
-        <img
-          v-if="playerIsland.avatarUrl"
-          :src="playerIsland.avatarUrl"
-          :alt="islandDisplayName"
-          class="navbar-player-island__avatar"
-        />
-        <div v-else class="navbar-player-island__avatar navbar-player-island__avatar--fallback">
-          {{ islandDisplayName.slice(0, 1) }}
-        </div>
-        <div class="navbar-player-island__meta">
-          <div class="navbar-player-island__name">{{ islandDisplayName }}</div>
-          <div class="navbar-player-island__title">{{ islandDisplayTitle }}</div>
-        </div>
-      </div>
-      <button
-        type="button"
-        class="navbar-player-island__follow"
-        :class="{ 'is-followed': islandIsFollowed }"
-        @click="toggleIslandFollow"
-      >
-        {{ islandIsFollowed ? '取关' : '关注' }}
-      </button>
-      <button
-        type="button"
-        class="navbar-player-island__expand"
-        @click="requestExpandDanmu"
-      >
-        <ChevronDown :size="14" />
-      </button>
-    </div>
-
     <div class="nav-actions" :class="{ 'nav-actions--windows': shouldShowWindowsControls }" data-tauri-drag-region>
-      <div v-if="!shouldCompactSearch" class="search-container" ref="searchContainerRef" data-tauri-drag-region="false">
+      <div class="search-container" ref="searchContainerRef" data-tauri-drag-region="false">
           <div class="search-shell" :class="{ focused: isSearchFocused }">
             <input
               v-model="searchQuery"
@@ -159,95 +122,6 @@
               </button>
             </div>
           </div>
-      </div>
-
-      <div v-else class="search-compact" ref="searchCompactRef" data-tauri-drag-region="false">
-        <button
-          type="button"
-          class="nav-icon-btn search-toggle-btn"
-          data-tauri-drag-region="false"
-          aria-label="搜索"
-          @click="toggleSearchPopup"
-        >
-          <Search :size="20" />
-        </button>
-        <div v-if="showSearchPopup" class="search-popup" data-tauri-drag-region="false">
-          <div class="search-container search-container--popup" ref="searchContainerRef" data-tauri-drag-region="false">
-            <div class="search-shell" :class="{ focused: isSearchFocused }">
-              <input
-                v-model="searchQuery"
-                type="text"
-                :placeholder="placeholderText"
-                data-tauri-drag-region="false"
-                class="search-input"
-                ref="searchInputRef"
-                @focus="handleFocus"
-                @blur="handleBlur"
-                @input="handleSearch"
-                @keydown.enter.prevent="handleSearchButtonClick"
-              />
-              <button
-                v-if="searchQuery"
-                type="button"
-                class="search-clear-btn"
-                data-tauri-drag-region="false"
-                aria-label="清除搜索"
-                @click="resetSearchState"
-              >
-                <X :size="14" />
-              </button>
-              <button
-                type="button"
-                class="search-submit-btn"
-                data-tauri-drag-region="false"
-                aria-label="搜索"
-                @click="handleSearchButtonClick"
-              >
-                <Search :size="15" />
-              </button>
-            </div>
-
-            <div v-show="showResults" class="search-results-wrapper">
-              <div v-if="isLoadingSearch" class="search-loading">搜索中...</div>
-              <div v-else-if="searchError" class="search-error-message">{{ searchError }}</div>
-              <div v-else-if="searchResults.length > 0" class="search-results-list">
-                <div
-                  v-for="anchor in searchResults"
-                  :key="anchor.platform + '-' + anchor.roomId"
-                  class="search-result-item"
-                  @mousedown="selectAnchor(anchor)"
-                >
-                  <div class="result-avatar">
-                    <img v-if="anchor.avatar" :src="anchor.avatar" :alt="anchor.userName" class="avatar-img" />
-                    <div v-else class="avatar-placeholder">{{ anchor.userName[0] }}</div>
-                  </div>
-
-                  <div class="result-main-content">
-                    <div class="result-line-1-main">
-                      <span class="result-name" :title="anchor.userName">{{ anchor.userName }}</span>
-                    </div>
-                    <div class="result-line-2-main">
-                      <span class="result-room-title" :title="anchor.roomTitle || '暂无标题'">{{ anchor.roomTitle || '暂无标题' }}</span>
-                    </div>
-                  </div>
-                  <span class="live-status-dot" :class="{ 'is-live': anchor.liveStatus }" aria-hidden="true"></span>
-                </div>
-              </div>
-
-              <div v-else-if="trimmedQuery && !isLoadingSearch && !searchError" class="search-no-results">
-                未找到结果
-                <button
-                  v-if="isPureNumeric(trimmedQuery)"
-                  class="search-fallback-btn"
-                  @mousedown.prevent="tryEnterRoom(trimmedQuery)"
-                  @click.prevent="tryEnterRoom(trimmedQuery)"
-                >
-                  进入房间 {{ trimmedQuery }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       <div ref="configMenuRef" class="nav-config" data-tauri-drag-region="false">
@@ -350,13 +224,12 @@ import { platform as detectPlatform } from '@tauri-apps/plugin-os';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { getVersion } from '@tauri-apps/api/app';
 import { useRoute } from 'vue-router';
-import { ChevronDown, Download, Github, LayoutGrid, Moon, Search, Settings2, Sun, Upload, X } from 'lucide-vue-next';
+import { Download, Github, LayoutGrid, Moon, Search, Settings2, Sun, Upload, X } from 'lucide-vue-next';
 import { motion } from 'motion-v';
 import WindowsWindowControls from '../components/window-controls/WindowsWindowControls.vue';
 import { useThemeStore } from '../stores/theme';
 import { Platform } from '../platforms/common/types';
 import type { Platform as UiPlatform } from './types';
-import { useFollowStore } from '../store/followStore';
 import { useCustomCategoryStore } from '../store/customCategoryStore';
 import {
   createPortableConfigPayload,
@@ -446,7 +319,6 @@ const isLoadingSearch = ref(false);
 const hasCompletedSearch = ref(false);
 const isSearchFocused = ref(false);
 const searchContainerRef = ref<HTMLElement | null>(null);
-const searchCompactRef = ref<HTMLElement | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const configMenuRef = ref<HTMLElement | null>(null);
 const platformTabsRef = ref<HTMLElement | null>(null);
@@ -488,48 +360,6 @@ const isWindowsPlatform = computed(() => {
   return name.startsWith('win');
 });
 const shouldShowWindowsControls = computed(() => isWindowsPlatform.value);
-const isPlayerRoute = computed(() => {
-  const name = route.name as string | undefined;
-  return name === 'douyuPlayer' || name === 'douyinPlayer' || name === 'huyaPlayer' || name === 'bilibiliPlayer';
-});
-const PLAYER_ISLAND_EVENT = 'dtv-player-island-state';
-const PLAYER_ISLAND_EXPAND_EVENT = 'dtv-player-island-expand';
-const playerIsland = ref({
-  visible: false,
-  anchorName: '',
-  title: '',
-  avatarUrl: null as string | null,
-  roomId: null as string | null,
-  platform: null as Platform | null,
-});
-const followStore = useFollowStore();
-const islandIsFollowed = computed(() => {
-  if (!playerIsland.value.platform || !playerIsland.value.roomId) {
-    return false;
-  }
-  return followStore.isFollowed(playerIsland.value.platform, playerIsland.value.roomId);
-});
-const islandDisplayName = computed(() => {
-  if (playerIsland.value.anchorName) {
-    return playerIsland.value.anchorName;
-  }
-  if (playerIsland.value.roomId) {
-    return `主播${playerIsland.value.roomId}`;
-  }
-  return '主播';
-});
-const islandDisplayTitle = computed(() => {
-  if (playerIsland.value.title) {
-    return playerIsland.value.title;
-  }
-  if (playerIsland.value.roomId) {
-    return `房间 ${playerIsland.value.roomId}`;
-  }
-  return '直播间';
-});
-
-const shouldCompactSearch = computed(() => playerIsland.value.visible);
-const showSearchPopup = ref(false);
 const showConfigMenu = ref(false);
 const isExportingConfig = ref(false);
 const isImportingConfig = ref(false);
@@ -537,38 +367,6 @@ const showImportTextDialog = ref(false);
 const importTextareaEl = ref<HTMLTextAreaElement | null>(null);
 const configStatus = ref<{ tone: 'info' | 'success' | 'error'; text: string } | null>(null);
 const isConfigBusy = computed(() => isExportingConfig.value || isImportingConfig.value);
-
-const openSearchPopup = async () => {
-  showSearchPopup.value = true;
-  await nextTick();
-  searchInputRef.value?.focus();
-  handleFocus();
-};
-
-const closeSearchPopup = () => {
-  showSearchPopup.value = false;
-  showResults.value = false;
-  isSearchFocused.value = false;
-};
-
-const toggleSearchPopup = () => {
-  if (showSearchPopup.value) {
-    closeSearchPopup();
-  } else {
-    openSearchPopup();
-  }
-};
-const resolveIslandFallback = (platform?: Platform | null, roomId?: string | null) => {
-  if (!platform || !roomId) {
-    return null;
-  }
-  return followStore.getFollowedStreamers.find((item) => {
-    if (item.platform !== platform) {
-      return false;
-    }
-    return item.id === roomId || item.currentRoomId === roomId;
-  }) ?? null;
-};
 
 const proxyBase = ref<string | null>(null);
 const ensureProxyStarted = async () => {
@@ -659,14 +457,6 @@ const handleDocumentPointerDown = (event: PointerEvent) => {
   const target = event.target as HTMLElement | null;
   if (!target) return;
 
-  if (showSearchPopup.value) {
-    const withinSearch = searchContainerRef.value?.contains(target);
-    const withinToggle = searchCompactRef.value?.contains(target);
-    if (!withinSearch && !withinToggle) {
-      closeSearchPopup();
-    }
-  }
-
   if (showConfigMenu.value && !configMenuRef.value?.contains(target)) {
     showConfigMenu.value = false;
   }
@@ -708,12 +498,6 @@ watch(platforms, () => {
   updateHighlight();
 });
 
-watch(shouldCompactSearch, (value) => {
-  if (!value) {
-    closeSearchPopup();
-  }
-});
-
 onMounted(() => {
   window.addEventListener('resize', updateHighlight);
   window.addEventListener('pointerdown', handleDocumentPointerDown);
@@ -739,62 +523,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', handleDocumentMouseDown);
-});
-
-const handlePlayerIslandEvent = (event: Event) => {
-  const customEvent = event as CustomEvent<{ visible?: boolean; anchorName?: string; title?: string; avatarUrl?: string | null; roomId?: string | null; platform?: Platform | null }>;
-  const detail = customEvent.detail;
-  if (!detail) {
-    return;
-  }
-  playerIsland.value = {
-    visible: !!detail.visible,
-    roomId: detail.roomId ?? null,
-    platform: detail.platform ?? null,
-    anchorName: detail.anchorName ?? resolveIslandFallback(detail.platform, detail.roomId)?.nickname ?? '',
-    title: detail.title ?? resolveIslandFallback(detail.platform, detail.roomId)?.roomTitle ?? '',
-    avatarUrl: detail.avatarUrl ?? resolveIslandFallback(detail.platform, detail.roomId)?.avatarUrl ?? null,
-  };
-};
-
-const requestExpandDanmu = () => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  window.dispatchEvent(new CustomEvent(PLAYER_ISLAND_EXPAND_EVENT));
-};
-
-const toggleIslandFollow = () => {
-  const platform = playerIsland.value.platform;
-  const roomId = playerIsland.value.roomId;
-  if (!platform || !roomId) {
-    return;
-  }
-  if (followStore.isFollowed(platform, roomId)) {
-    followStore.unfollowStreamer(platform, roomId);
-    return;
-  }
-  followStore.followStreamer({
-    platform,
-    id: roomId,
-    nickname: playerIsland.value.anchorName || roomId,
-    avatarUrl: playerIsland.value.avatarUrl || '',
-    roomTitle: playerIsland.value.title || '',
-    currentRoomId: roomId,
-    liveStatus: 'UNKNOWN',
-  });
-};
-
-onMounted(() => {
-  if (typeof window !== 'undefined') {
-    window.addEventListener(PLAYER_ISLAND_EVENT, handlePlayerIslandEvent as EventListener);
-  }
-});
-
-onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') {
-    window.removeEventListener(PLAYER_ISLAND_EVENT, handlePlayerIslandEvent as EventListener);
-  }
 });
 
 const toggleTheme = () => {
@@ -1169,247 +897,10 @@ const tryEnterRoom = (roomId: string) => {
   flex: 0 0 auto;
 }
 
-.navbar-player-island {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: min(320px, calc(100% - 640px));
-  min-height: 42px;
-  padding: 6px 10px 6px 8px;
-  border-radius: 999px;
-  background: rgba(16, 16, 18, 0.94);
-  border: 1px solid rgba(0, 0, 0, 0.22);
-  box-shadow: none;
-}
-
-.navbar-player-island__left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.navbar-player-island__avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  object-fit: cover;
-  flex: 0 0 auto;
-}
-
-.navbar-player-island__avatar--fallback {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #f8fafc;
-  background: rgba(148, 163, 184, 0.2);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.navbar-player-island__meta {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-
-.navbar-player-island__name {
-  color: rgba(248, 250, 252, 0.98);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: clip;
-}
-
-.navbar-player-island__title {
-  color: rgba(203, 213, 225, 0.9);
-  font-size: 11px;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: clip;
-}
-
-.navbar-player-island__expand {
-  border: none;
-  border-radius: 999px;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  color: rgba(248, 250, 252, 0.96);
-  background: rgba(148, 163, 184, 0.22);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  flex: 0 0 auto;
-}
-
-.navbar-player-island__expand:hover {
-  background: rgba(148, 163, 184, 0.3);
-}
-
-.navbar-player-island__follow {
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
-  padding: 5px 11px;
-  font-size: 11px;
-  font-weight: 700;
-  color: rgba(248, 250, 252, 0.96);
-  background: linear-gradient(180deg, rgba(120, 133, 147, 0.32), rgba(92, 104, 118, 0.26));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.2);
-  cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-  flex: 0 0 auto;
-}
-
-.navbar-player-island__follow:hover {
-  background: linear-gradient(180deg, rgba(134, 147, 161, 0.38), rgba(104, 117, 132, 0.3));
-  transform: translateY(-1px);
-}
-
-.navbar-player-island__follow.is-followed {
-  border-color: rgba(110, 231, 183, 0.28);
-  background: linear-gradient(180deg, rgba(45, 212, 191, 0.34), rgba(16, 185, 129, 0.28));
-  color: rgba(236, 253, 245, 0.98);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.16);
-}
-
-:global([data-theme='light']) .navbar-player-island,
-:global(html[data-theme='light']) .navbar-player-island,
-:global(:root[data-theme='light']) .navbar-player-island {
-  background: rgba(248, 250, 252, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.9);
-}
-
-:global([data-theme='light']) .navbar-player-island__avatar,
-:global(html[data-theme='light']) .navbar-player-island__avatar,
-:global(:root[data-theme='light']) .navbar-player-island__avatar {
-  border-color: rgba(148, 163, 184, 0.38);
-}
-
-:global([data-theme='light']) .navbar-player-island__avatar--fallback,
-:global(html[data-theme='light']) .navbar-player-island__avatar--fallback,
-:global(:root[data-theme='light']) .navbar-player-island__avatar--fallback {
-  color: #0f172a;
-  background: rgba(148, 163, 184, 0.24);
-}
-
-:global([data-theme='light']) .navbar-player-island__name,
-:global(html[data-theme='light']) .navbar-player-island__name,
-:global(:root[data-theme='light']) .navbar-player-island__name {
-  color: #111827;
-}
-
-:global([data-theme='light']) .navbar-player-island__title,
-:global(html[data-theme='light']) .navbar-player-island__title,
-:global(:root[data-theme='light']) .navbar-player-island__title {
-  color: #475569;
-}
-
-
-:global([data-theme='light']) .navbar-player-island__expand,
-:global(html[data-theme='light']) .navbar-player-island__expand,
-:global(:root[data-theme='light']) .navbar-player-island__expand,
-:global([data-theme='light']) .navbar-player-island__follow,
-:global(html[data-theme='light']) .navbar-player-island__follow,
-:global(:root[data-theme='light']) .navbar-player-island__follow {
-  color: #0f172a;
-  border-color: rgba(148, 163, 184, 0.35);
-  background: linear-gradient(180deg, rgba(241, 245, 249, 0.98), rgba(226, 232, 240, 0.92));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
-    inset 0 -1px 0 rgba(148, 163, 184, 0.24);
-}
-
-:global([data-theme='light']) .navbar-player-island__follow.is-followed,
-:global(html[data-theme='light']) .navbar-player-island__follow.is-followed,
-:global(:root[data-theme='light']) .navbar-player-island__follow.is-followed {
-  border-color: rgba(16, 185, 129, 0.35);
-  background: linear-gradient(180deg, rgba(209, 250, 229, 0.98), rgba(167, 243, 208, 0.9));
-  color: #065f46;
-}
-
-:global([data-theme='dark']) .navbar-player-island,
-:global(html[data-theme='dark']) .navbar-player-island,
-:global(:root[data-theme='dark']) .navbar-player-island {
-  background: rgba(248, 250, 252, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  box-shadow: none;
-}
-
-:global([data-theme='dark']) .navbar-player-island__avatar,
-:global(html[data-theme='dark']) .navbar-player-island__avatar,
-:global(:root[data-theme='dark']) .navbar-player-island__avatar {
-  border-color: rgba(148, 163, 184, 0.38);
-}
-
-:global([data-theme='dark']) .navbar-player-island__avatar--fallback,
-:global(html[data-theme='dark']) .navbar-player-island__avatar--fallback,
-:global(:root[data-theme='dark']) .navbar-player-island__avatar--fallback {
-  color: #0f172a;
-  background: rgba(148, 163, 184, 0.24);
-}
-
-:global([data-theme='dark']) .navbar-player-island__name,
-:global(html[data-theme='dark']) .navbar-player-island__name,
-:global(:root[data-theme='dark']) .navbar-player-island__name {
-  color: #111827;
-}
-
 :global([data-theme='dark']) .live-wave,
 :global(html[data-theme='dark']) .live-wave,
 :global(:root[data-theme='dark']) .live-wave {
   background: rgba(15, 23, 42, 0.9);
-}
-
-:global([data-theme='dark']) .navbar-player-island__title,
-:global(html[data-theme='dark']) .navbar-player-island__title,
-:global(:root[data-theme='dark']) .navbar-player-island__title {
-  color: #475569;
-}
-
-:global([data-theme='dark']) .navbar-player-island__expand,
-:global(html[data-theme='dark']) .navbar-player-island__expand,
-:global(:root[data-theme='dark']) .navbar-player-island__expand {
-  color: #0f172a;
-  background: rgba(148, 163, 184, 0.24);
-}
-
-:global([data-theme='dark']) .navbar-player-island__expand:hover,
-:global(html[data-theme='dark']) .navbar-player-island__expand:hover,
-:global(:root[data-theme='dark']) .navbar-player-island__expand:hover {
-  background: rgba(148, 163, 184, 0.34);
-}
-
-:global([data-theme='dark']) .navbar-player-island__follow,
-:global(html[data-theme='dark']) .navbar-player-island__follow,
-:global(:root[data-theme='dark']) .navbar-player-island__follow {
-  color: #0f172a;
-  background: rgba(148, 163, 184, 0.24);
-}
-
-:global([data-theme='dark']) .navbar-player-island__follow:hover,
-:global(html[data-theme='dark']) .navbar-player-island__follow:hover,
-:global(:root[data-theme='dark']) .navbar-player-island__follow:hover {
-  background: rgba(148, 163, 184, 0.34);
 }
 
 .mac-controls {
@@ -1557,20 +1048,6 @@ const tryEnterRoom = (roomId: string) => {
   width: min(240px, 24vw);
 }
 
-.search-compact {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.search-popup {
-  position: absolute;
-  right: 0;
-  top: 54px;
-  z-index: 40;
-  padding-top: 4px;
-}
-
 .nav-config {
   position: relative;
   display: inline-flex;
@@ -1700,10 +1177,6 @@ const tryEnterRoom = (roomId: string) => {
   gap: 8px;
   font-size: 13px;
   font-weight: 700;
-}
-
-.search-container--popup {
-  width: min(280px, 60vw);
 }
 
 .search-shell {

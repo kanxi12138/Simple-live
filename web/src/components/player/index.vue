@@ -1,11 +1,13 @@
 ﻿<template>
   <div class="player-page" :class="{ 'web-fs': isInWebFullscreen || isInNativePlayerFullscreen }">
-    <button v-if="!isInWebFullscreen" @click="handleClosePlayerClick" class="player-close-btn" title="关闭播放器">
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="18" y1="6" x2="6" y2="18"></line>
-        <line x1="6" y1="6" x2="18" y2="18"></line>
-      </svg>
-    </button>
+    <Transition name="player-floating-action">
+      <button v-if="!isInWebFullscreen" @click="handleClosePlayerClick" class="player-close-btn" title="关闭播放器">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </Transition>
 
     <div class="player-layout">
       <div class="main-content">
@@ -27,20 +29,22 @@
           v-else-if="isOfflineError"
           class="player-container player-container--solo player-container--offline"
         >
-          <StreamerInfo 
-            v-if="props.roomId && props.platform"
-            :room-id="props.roomId"
-            :platform="props.platform"
-            :title="playerTitle"
-            :anchor-name="playerAnchorName"
-            :avatar="playerAvatar"
-            :is-live="false"
-            :is-followed="props.isFollowed"
-            @follow="$emit('follow', $event)"
-            @unfollow="$emit('unfollow', $event)"
-            @details="handleStreamerDetails"
-            class="streamer-info-offline"
-          />
+          <Transition name="player-panel-fade">
+            <StreamerInfo
+              v-if="props.roomId && props.platform"
+              :room-id="props.roomId"
+              :platform="props.platform"
+              :title="playerTitle"
+              :anchor-name="playerAnchorName"
+              :avatar="playerAvatar"
+              :is-live="false"
+              :is-followed="props.isFollowed"
+              @follow="$emit('follow', $event)"
+              @unfollow="$emit('unfollow', $event)"
+              @details="handleStreamerDetails"
+              class="streamer-info-offline"
+            />
+          </Transition>
           <div class="video-container video-container--offline">
             <div class="offline-placeholder">
               <span class="offline-placeholder__label">当前主播未开播！</span>
@@ -60,59 +64,57 @@
           <button @click="retryInitialization" class="retry-btn">再试一次</button>
         </div>
         <div v-else class="player-container" :class="{ 'player-container--solo': !isDanmuVisible }">
-          <StreamerInfo
-            v-if="props.roomId && !isInWebFullscreen && !isDanmuCollapsed"
-            :room-id="props.roomId"
-            :platform="props.platform"
-            :title="playerTitle"
-            :anchor-name="playerAnchorName"
-            :avatar="playerAvatar"
-            :is-followed="props.isFollowed"
-            :is-live="playerIsLive"
-            @follow="$emit('follow', $event)"
-            @unfollow="$emit('unfollow', $event)"
-            @details="handleStreamerDetails"
-            class="streamer-info"
-            :class="{'hidden-panel': isInWebFullscreen}"
-          />
+          <Transition name="player-panel-fade">
+            <StreamerInfo
+              v-if="props.roomId && !isInWebFullscreen"
+              :room-id="props.roomId"
+              :platform="props.platform"
+              :title="playerTitle"
+              :anchor-name="playerAnchorName"
+              :avatar="playerAvatar"
+              :is-followed="props.isFollowed"
+              :is-live="playerIsLive"
+              @follow="$emit('follow', $event)"
+              @unfollow="$emit('unfollow', $event)"
+              @details="handleStreamerDetails"
+              class="streamer-info"
+              :class="{'hidden-panel': isInWebFullscreen}"
+            />
+          </Transition>
           <div class="video-container">
             <div ref="playerContainerRef" class="video-player"></div>
           </div>
         </div>
       </div>
 
-      <DanmuList 
-        v-if="roomId && !isLoadingStream && !streamError && isDanmuVisible && !isFullScreen" 
-        :room-id="props.roomId"
-        :messages="danmakuMessages"
-        class="danmu-panel" 
-        :class="{'hidden-panel': isFullScreen}"
-        ref="danmuListRef"
-      >
-        <template #actions>
-          <div
-            v-if="canToggleDanmuPanel && !isDanmuCollapsed && !isFullScreen"
-            class="danmu-panel-actions"
-          >
-            <button
-              type="button"
-              class="danmu-filter-toggle-btn"
-              title="屏蔽关键词"
-              @click="toggleDanmuFilterPanel"
-            >
-              <Funnel :size="18" />
-            </button>
-            <button
-              type="button"
-              class="danmu-collapse-btn"
-              title="折叠弹幕列表"
-              @click="collapseDanmuPanel"
-            >
-              <PanelRightClose :size="22" />
-            </button>
-          </div>
-        </template>
-      </DanmuList>
+      <Transition name="danmu-panel-slide">
+        <DanmuList
+          v-if="roomId && !isLoadingStream && !streamError && isDanmuVisible && !isFullScreen"
+          :room-id="props.roomId"
+          :messages="danmakuMessages"
+          class="danmu-panel"
+          :class="{'hidden-panel': isFullScreen}"
+          ref="danmuListRef"
+        >
+          <template #actions>
+            <Transition name="player-panel-actions">
+              <div
+                v-if="canToggleDanmuPanel && !isFullScreen"
+                class="danmu-panel-actions"
+              >
+                <button
+                  type="button"
+                  class="danmu-filter-toggle-btn"
+                  title="屏蔽关键词"
+                  @click="toggleDanmuFilterPanel"
+                >
+                  <Funnel :size="18" />
+                </button>
+              </div>
+            </Transition>
+          </template>
+        </DanmuList>
+      </Transition>
     </div>
   </div>
 </template>
@@ -123,7 +125,7 @@ import Player from 'xgplayer';
 import FlvPlugin from 'xgplayer-flv';
 import HlsPlugin from 'xgplayer-hls.js';
 import { POSITIONS } from 'xgplayer/es/plugin/plugin.js';
-import { Funnel, PanelRightClose } from 'lucide-vue-next';
+import { Funnel } from 'lucide-vue-next';
 import 'xgplayer/dist/index.min.css';
 
 import './player.css';
@@ -142,6 +144,7 @@ import {
   type DanmuUserSettings,
 } from './constants';
 import {
+  BackgroundAudioControl,
   DanmuSettingsControl,
   DanmuToggleControl,
   LineControl,
@@ -183,14 +186,6 @@ const emit = defineEmits<{
 }>();
 
 const isClosing = ref(false);
-const MIN_DANMU_WIDTH = 1100;
-const DANMU_COLLAPSED_STORAGE_KEY = 'dtv_player_danmu_collapsed';
-const PLAYER_ISLAND_EVENT = 'dtv-player-island-state';
-const PLAYER_ISLAND_EXPAND_EVENT = 'dtv-player-island-expand';
-const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 0);
-const updateWindowWidth = () => {
-  windowWidth.value = typeof window !== 'undefined' ? window.innerWidth : 0;
-};
 const supportsDanmuForPlatform = (platform: StreamingPlatform | null | undefined) => {
   if (platform == null) {
     return false;
@@ -213,77 +208,13 @@ const supportsQualityForPlatform = (platform: StreamingPlatform | null | undefin
     StreamingPlatform.BILIBILI,
   ].includes(platform);
 };
-const showDanmuPanel = computed(() => windowWidth.value >= MIN_DANMU_WIDTH);
 const supportsDanmu = computed(() => supportsDanmuForPlatform(props.platform));
 const supportsQuality = computed(() => supportsQualityForPlatform(props.platform));
-const isDanmuCollapsed = ref(
-  typeof window !== 'undefined' && window.localStorage.getItem(DANMU_COLLAPSED_STORAGE_KEY) === '1',
-);
-const canToggleDanmuPanel = computed(() => supportsDanmu.value && showDanmuPanel.value && !!props.roomId && !isLoadingStream.value && !streamError.value);
-const isDanmuVisible = computed(() => canToggleDanmuPanel.value && !isDanmuCollapsed.value);
-const showCompactIsland = computed(() => isDanmuCollapsed.value && canToggleDanmuPanel.value && !isFullScreen.value);
-let islandDispatchRaf: number | null = null;
-let pendingIslandPayload: {
-  visible: boolean;
-  anchorName: string;
-  title: string;
-  avatarUrl: string | null;
-  roomId: string | null;
-  platform: StreamingPlatform | null;
-} | null = null;
-let pendingIslandSignature = '';
-let lastIslandSignature = '';
-
-const collapseDanmuPanel = () => {
-  isDanmuCollapsed.value = true;
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(DANMU_COLLAPSED_STORAGE_KEY, '1');
-  }
-};
-
-const expandDanmuPanel = () => {
-  isDanmuCollapsed.value = false;
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(DANMU_COLLAPSED_STORAGE_KEY, '0');
-  }
-};
+const canToggleDanmuPanel = computed(() => supportsDanmu.value && !!props.roomId && !isLoadingStream.value && !streamError.value);
+const isDanmuVisible = computed(() => canToggleDanmuPanel.value);
 
 const toggleDanmuFilterPanel = () => {
   danmuListRef.value?.toggleFilterPanel?.();
-};
-
-const broadcastIslandState = () => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  const payload = {
-    visible: showCompactIsland.value,
-    anchorName: playerAnchorName.value ?? '',
-    title: playerTitle.value ?? '',
-    avatarUrl: playerAvatar.value ?? null,
-    roomId: props.roomId ?? null,
-    platform: props.platform ?? null,
-  };
-  const signature = JSON.stringify(payload);
-  if (signature === lastIslandSignature) {
-    return;
-  }
-  pendingIslandPayload = payload;
-  pendingIslandSignature = signature;
-  if (islandDispatchRaf !== null) {
-    return;
-  }
-  islandDispatchRaf = window.requestAnimationFrame(() => {
-    islandDispatchRaf = null;
-    if (!pendingIslandPayload) {
-      return;
-    }
-    lastIslandSignature = pendingIslandSignature;
-    window.dispatchEvent(new CustomEvent(PLAYER_ISLAND_EVENT, {
-      detail: pendingIslandPayload,
-    }));
-    pendingIslandPayload = null;
-  });
 };
 
 const playerContainerRef = ref<HTMLDivElement | null>(null);
@@ -292,6 +223,7 @@ const playerInstance = shallowRef<Player | null>(null);
 const refreshControlPlugin = shallowRef<RefreshControl | null>(null);
 const qualityControlPlugin = shallowRef<QualityControl | null>(null);
 const lineControlPlugin = shallowRef<LineControl | null>(null);
+const backgroundAudioControlPlugin = shallowRef<BackgroundAudioControl | null>(null);
 const danmuTogglePlugin = shallowRef<DanmuToggleControl | null>(null);
 const danmuSettingsPlugin = shallowRef<DanmuSettingsControl | null>(null);
 const volumeControlPlugin = shallowRef<VolumeControl | null>(null);
@@ -358,6 +290,44 @@ const currentQuality = ref<string>(resolveStoredQuality(props.platform));
 const isQualitySwitching = ref(false);
 const isRefreshingStream = ref(false);
 const isLineSwitching = ref(false);
+const isBackgroundAudioEnabled = ref(false);
+
+interface BackgroundAudioSource {
+  streamUrl: string;
+  streamType: string;
+}
+
+interface BackgroundAudioBridge {
+  disable: () => void;
+  enable: (
+    streamUrl: string,
+    streamType: string,
+    title: string,
+    anchorName: string,
+  ) => void;
+  update: (
+    streamUrl: string,
+    streamType: string,
+    title: string,
+    anchorName: string,
+  ) => void;
+}
+
+interface OrientationBridge {
+  enterLandscapeFullscreen: () => void;
+  enterPortraitFullscreen: () => void;
+  exitFullscreen: () => void;
+}
+
+type DtvWindow = Window & typeof globalThis & {
+  DTVBackgroundAudio?: BackgroundAudioBridge;
+  DTVOrientation?: OrientationBridge;
+  __DTV_HANDLE_ANDROID_BACK__?: () => boolean;
+  __DTV_PAUSE_WEB_PLAYER__?: () => void;
+  __DTV_RESUME_WEB_PLAYER__?: () => void;
+};
+
+let backgroundAudioSource: BackgroundAudioSource | null = null;
 
 const currentLine = ref<string | null>(resolveStoredLine(props.platform));
 const lineOptions = computed(() => getLineOptionsForPlatform(props.platform));
@@ -376,6 +346,7 @@ const FULLSCREEN_CONTROL_SELECTOR = [
 let fullscreenHistoryActive = false;
 let ignoreNextFullscreenPop = false;
 let fullscreenControlCleanup: (() => void) | null = null;
+let videoOrientationCleanup: (() => void) | null = null;
 let pendingFullscreenRestore = false;
 let preserveFullscreenDuringReload = false;
 
@@ -425,12 +396,16 @@ function updateFullscreenFlag() {
   emit('fullscreen-change', isFullScreen.value);
 }
 
-function getOrientationBridge(): { setLandscape?: () => void; setPortrait?: () => void } | null {
+function getDtvWindow(): DtvWindow | null {
   if (typeof window === 'undefined') {
     return null;
   }
-  const bridge = (window as any).DTVOrientation;
-  if (!bridge || (typeof bridge.setLandscape !== 'function' && typeof bridge.setPortrait !== 'function')) {
+  return window as DtvWindow;
+}
+
+function getOrientationBridge(): OrientationBridge | null {
+  const bridge = getDtvWindow()?.DTVOrientation;
+  if (!bridge) {
     return null;
   }
   return bridge;
@@ -446,12 +421,109 @@ function setNativeOrientation(mode: 'landscape' | 'portrait') {
       return;
     }
     if (mode === 'landscape') {
-      bridge.setLandscape?.();
-    } else {
-      bridge.setPortrait?.();
+      bridge.enterLandscapeFullscreen();
+      return;
     }
+    bridge.enterPortraitFullscreen();
   } catch (error) {
     console.warn(`[Player] Failed setting ${mode} orientation:`, error);
+  }
+}
+
+function exitNativeFullscreen() {
+  if (!isAndroidRuntime) {
+    return;
+  }
+  try {
+    getOrientationBridge()?.exitFullscreen();
+  } catch (error) {
+    console.warn('[Player] Failed exiting native fullscreen:', error);
+  }
+}
+
+function getPlayerVideoElement(player: Player | null): HTMLVideoElement | null {
+  if (player?.media instanceof HTMLVideoElement) {
+    return player.media;
+  }
+  const videoElement = player?.root?.querySelector('video');
+  return videoElement instanceof HTMLVideoElement ? videoElement : null;
+}
+
+function resolveVideoOrientation(): 'landscape' | 'portrait' {
+  const media = getPlayerVideoElement(playerInstance.value);
+  if (!media || media.videoWidth <= 0 || media.videoHeight <= 0) {
+    return 'landscape';
+  }
+  return media.videoHeight > media.videoWidth ? 'portrait' : 'landscape';
+}
+
+function bindVideoOrientation(player: Player) {
+  videoOrientationCleanup?.();
+  videoOrientationCleanup = null;
+  const media = getPlayerVideoElement(player);
+  if (!media) {
+    return;
+  }
+  const handleDimensionsChanged = () => {
+    if (isFullScreen.value || preserveFullscreenDuringReload) {
+      setNativeOrientation(resolveVideoOrientation());
+    }
+  };
+  media.addEventListener('loadedmetadata', handleDimensionsChanged);
+  media.addEventListener('resize', handleDimensionsChanged);
+  videoOrientationCleanup = () => {
+    media.removeEventListener('loadedmetadata', handleDimensionsChanged);
+    media.removeEventListener('resize', handleDimensionsChanged);
+  };
+}
+
+function getBackgroundAudioBridge(): BackgroundAudioBridge | null {
+  return getDtvWindow()?.DTVBackgroundAudio ?? null;
+}
+
+function syncBackgroundAudioSource(action: 'enable' | 'update') {
+  const bridge = getBackgroundAudioBridge();
+  if (!bridge || !backgroundAudioSource) {
+    return false;
+  }
+  const invokeBridge = action === 'enable' ? bridge.enable : bridge.update;
+  invokeBridge(
+    backgroundAudioSource.streamUrl,
+    backgroundAudioSource.streamType,
+    playerTitle.value ?? '',
+    playerAnchorName.value ?? '',
+  );
+  return true;
+}
+
+function setBackgroundAudioEnabled(enabled: boolean) {
+  try {
+    if (!enabled) {
+      isBackgroundAudioEnabled.value = false;
+      getBackgroundAudioBridge()?.disable();
+      backgroundAudioControlPlugin.value?.setEnabled(false);
+      return;
+    }
+    isBackgroundAudioEnabled.value = syncBackgroundAudioSource('enable');
+    backgroundAudioControlPlugin.value?.setEnabled(isBackgroundAudioEnabled.value);
+  } catch (error) {
+    isBackgroundAudioEnabled.value = false;
+    backgroundAudioControlPlugin.value?.setEnabled(false);
+    console.error('[Player] Failed updating background audio:', error);
+  }
+}
+
+function updateBackgroundAudioSource() {
+  if (!isBackgroundAudioEnabled.value) {
+    return;
+  }
+  try {
+    if (!syncBackgroundAudioSource('update')) {
+      setBackgroundAudioEnabled(false);
+    }
+  } catch (error) {
+    setBackgroundAudioEnabled(false);
+    console.error('[Player] Failed refreshing background audio source:', error);
   }
 }
 
@@ -493,11 +565,11 @@ function clearFullscreenHistoryEntry() {
 
 function syncPlayerOrientation(isFullscreen: boolean) {
   if (isFullscreen) {
-    setNativeOrientation('landscape');
+    setNativeOrientation(resolveVideoOrientation());
     ensureFullscreenHistoryEntry();
     return;
   }
-  setNativeOrientation('portrait');
+  exitNativeFullscreen();
   clearFullscreenHistoryEntry();
 }
 
@@ -512,7 +584,7 @@ function exitPlayerFullscreenFromSystemBack() {
     player?.isCssfullScreen || isInWebFullscreen.value || isInNativePlayerFullscreen.value,
   );
   if (!player || !isCurrentlyFullscreen) {
-    setNativeOrientation('portrait');
+    exitNativeFullscreen();
     return;
   }
   togglePlayerFullscreen(false);
@@ -527,7 +599,7 @@ function togglePlayerFullscreen(forceFullscreen?: boolean) {
   }) | null;
   if (!player) {
     if (forceFullscreen === false) {
-      setNativeOrientation('portrait');
+      exitNativeFullscreen();
     }
     return;
   }
@@ -541,13 +613,13 @@ function togglePlayerFullscreen(forceFullscreen?: boolean) {
 
   try {
     if (shouldEnterFullscreen) {
-      setNativeOrientation('landscape');
+      setNativeOrientation(resolveVideoOrientation());
       player.getCssFullscreen?.();
     } else if (isInWebFullscreen.value && typeof player.exitCssFullscreen === 'function') {
-      setNativeOrientation('portrait');
+      exitNativeFullscreen();
       player.exitCssFullscreen();
     } else if (typeof player.exitFullscreen === 'function') {
-      setNativeOrientation('portrait');
+      exitNativeFullscreen();
       player.exitFullscreen();
     } else {
       resetFullscreenState();
@@ -555,7 +627,7 @@ function togglePlayerFullscreen(forceFullscreen?: boolean) {
   } catch (error) {
     console.warn('[Player] Failed toggling fullscreen state:', error);
     if (!shouldEnterFullscreen) {
-      setNativeOrientation('portrait');
+      exitNativeFullscreen();
     }
   }
 }
@@ -630,7 +702,7 @@ function destroyPlayerInstance(options?: { preserveFullscreen?: boolean }) {
   if (preserveFullscreen) {
     pendingFullscreenRestore = true;
     preserveFullscreenDuringReload = true;
-    setNativeOrientation('landscape');
+    setNativeOrientation(resolveVideoOrientation());
     try {
       document.documentElement.classList.add('web-fs-active');
     } catch (error) {
@@ -641,6 +713,8 @@ function destroyPlayerInstance(options?: { preserveFullscreen?: boolean }) {
     fullscreenControlCleanup();
     fullscreenControlCleanup = null;
   }
+  videoOrientationCleanup?.();
+  videoOrientationCleanup = null;
   const player = playerInstance.value;
   if (player) {
     try {
@@ -666,6 +740,7 @@ function destroyPlayerInstance(options?: { preserveFullscreen?: boolean }) {
   refreshControlPlugin.value = null;
   qualityControlPlugin.value = null;
   lineControlPlugin.value = null;
+  backgroundAudioControlPlugin.value = null;
   danmuTogglePlugin.value = null;
   danmuSettingsPlugin.value = null;
   volumeControlPlugin.value = null;
@@ -801,6 +876,11 @@ async function mountXgPlayer(
   }
 
   playerInstance.value = player;
+  backgroundAudioSource = {
+    streamUrl,
+    streamType: playbackType,
+  };
+  bindVideoOrientation(player);
   const storedPlayerVolume = loadStoredVolume();
   if (storedPlayerVolume !== null) {
     player.volume = storedPlayerVolume;
@@ -896,6 +976,18 @@ async function mountXgPlayer(
   }) as LineControl;
   lineControlPlugin.value?.setOptions(lineOptionsForPlatform);
   lineControlPlugin.value?.updateLabel(getCurrentLineLabel(currentLine.value));
+
+  backgroundAudioControlPlugin.value = player.registerPlugin(BackgroundAudioControl, {
+    position: POSITIONS.CONTROLS_RIGHT,
+    index: 5.3,
+    disable: !isAndroidRuntime,
+    getState: () => isBackgroundAudioEnabled.value,
+    onToggle: (enabled: boolean) => {
+      setBackgroundAudioEnabled(enabled);
+    },
+  }) as BackgroundAudioControl;
+  backgroundAudioControlPlugin.value?.setEnabled(isBackgroundAudioEnabled.value);
+  updateBackgroundAudioSource();
 
   arrangeControlClusters(player);
 
@@ -1233,7 +1325,6 @@ const danmakuManagerContext = {
   danmakuMessages,
   isDanmuEnabled,
   danmuSettings,
-  isDanmuListCollapsed: isDanmuCollapsed,
   isFullScreen,
   isDanmakuListenerActive,
   unlistenDanmakuFn,
@@ -1441,21 +1532,20 @@ registerPlayerWatchers({
   playerRoot: () => playerInstance.value?.root as HTMLElement | null,
 });
 
-watch(showDanmuPanel, (available) => {
-  if (!available) {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(DANMU_COLLAPSED_STORAGE_KEY, isDanmuCollapsed.value ? '1' : '0');
-    }
-  }
-});
-
 watch(
-  [showCompactIsland, playerAnchorName, playerTitle, playerAvatar],
-  () => {
-    broadcastIslandState();
+  () => [props.roomId, props.platform] as const,
+  (currentRoom, previousRoom) => {
+    if (currentRoom[0] === previousRoom[0] && currentRoom[1] === previousRoom[1]) {
+      return;
+    }
+    setBackgroundAudioEnabled(false);
+    backgroundAudioSource = null;
   },
-  { immediate: true },
 );
+
+watch([playerTitle, playerAnchorName], () => {
+  updateBackgroundAudioSource();
+});
 
 const handleFullscreenPopState = () => {
   if (ignoreNextFullscreenPop) {
@@ -1469,24 +1559,34 @@ const handleFullscreenPopState = () => {
   if (isFullScreen.value || isInWebFullscreen.value || isInNativePlayerFullscreen.value) {
     exitPlayerFullscreenFromSystemBack();
   } else {
-    setNativeOrientation('portrait');
+    exitNativeFullscreen();
   }
 };
 
 if (typeof window !== 'undefined') {
-  (window as any).__DTV_HANDLE_ANDROID_BACK__ = () => {
+  const dtvWindow = window as DtvWindow;
+  dtvWindow.__DTV_HANDLE_ANDROID_BACK__ = () => {
     if (!isFullScreen.value && !isInWebFullscreen.value && !isInNativePlayerFullscreen.value) {
       return false;
     }
     exitPlayerFullscreenFromSystemBack();
     return true;
   };
+  dtvWindow.__DTV_PAUSE_WEB_PLAYER__ = () => {
+    playerInstance.value?.mediaPause();
+  };
+  dtvWindow.__DTV_RESUME_WEB_PLAYER__ = () => {
+    const player = playerInstance.value;
+    if (player) {
+      void player.mediaPlay().catch((error: unknown) => {
+        console.warn('[Player] Failed resuming after background audio:', error);
+      });
+    }
+  };
 }
 
 onMounted(async () => {
-  updateWindowWidth();
   if (typeof window !== 'undefined') {
-    window.addEventListener('resize', updateWindowWidth, { passive: true });
     window.addEventListener('popstate', handleFullscreenPopState);
   }
   // 初始化画质偏好
@@ -1507,24 +1607,19 @@ onMounted(async () => {
 
   persistCurrentDanmuPreferences();
 
-  if (typeof window !== 'undefined') {
-    window.addEventListener(PLAYER_ISLAND_EXPAND_EVENT, expandDanmuPanel);
-  }
 });
 
 onUnmounted(async () => {
   beginPlayerInitRun();
   if (typeof window !== 'undefined') {
-    window.removeEventListener('resize', updateWindowWidth);
     window.removeEventListener('popstate', handleFullscreenPopState);
-    if (islandDispatchRaf !== null) {
-      window.cancelAnimationFrame(islandDispatchRaf);
-      islandDispatchRaf = null;
-    }
-    if ((window as any).__DTV_HANDLE_ANDROID_BACK__) {
-      delete (window as any).__DTV_HANDLE_ANDROID_BACK__;
-    }
+    const dtvWindow = window as DtvWindow;
+    delete dtvWindow.__DTV_HANDLE_ANDROID_BACK__;
+    delete dtvWindow.__DTV_PAUSE_WEB_PLAYER__;
+    delete dtvWindow.__DTV_RESUME_WEB_PLAYER__;
   }
+  setBackgroundAudioEnabled(false);
+  backgroundAudioSource = null;
   const platformToStop: StreamingPlatform = props.platform;
   const roomIdToStop: string | null = props.roomId;
   await stopCurrentDanmakuListener(platformToStop, roomIdToStop);
@@ -1535,13 +1630,6 @@ onUnmounted(async () => {
 
   destroyPlayerInstance();
   danmakuMessages.value = []; 
-
-  if (typeof window !== 'undefined') {
-    window.removeEventListener(PLAYER_ISLAND_EXPAND_EVENT, expandDanmuPanel);
-    window.dispatchEvent(new CustomEvent(PLAYER_ISLAND_EVENT, {
-      detail: { visible: false, anchorName: '', title: '', avatarUrl: null, roomId: null, platform: null },
-    }));
-  }
 });
 
 </script>

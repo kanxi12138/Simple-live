@@ -1,20 +1,23 @@
 ﻿<template>
   <div class="mobile-app-shell">
-    <MobileTopbar
-      v-if="!shouldHideChrome && !isPlayerRoute"
-      :active-platform="activePlatform"
-      :theme="theme"
-      :subtitle="subtitle"
-      @platform-change="handlePlatformChange"
-      @theme-toggle="toggleTheme"
-      @open-search="isSearchSheetOpen = true"
-      @open-follows="isFollowsSheetOpen = true"
-    />
+    <Transition name="chrome-topbar">
+      <MobileTopbar
+        v-if="!shouldHideChrome && !isPlayerRoute"
+        key="home-topbar"
+        :active-platform="activePlatform"
+        :theme="theme"
+        :subtitle="subtitle"
+        @platform-change="handlePlatformChange"
+        @theme-toggle="toggleTheme"
+        @open-search="isSearchSheetOpen = true"
+        @open-follows="isFollowsSheetOpen = true"
+      />
 
-    <header v-else-if="!shouldHideChrome && isPlayerRoute" class="player-topbar">
-      <button type="button" class="player-back-btn" @click="router.back()">返回</button>
-      <span>{{ subtitle }}</span>
-    </header>
+      <header v-else-if="!shouldHideChrome && isPlayerRoute" key="player-topbar" class="player-topbar">
+        <button type="button" class="player-back-btn" @click="router.back()">返回</button>
+        <span>{{ subtitle }}</span>
+      </header>
+    </Transition>
 
     <main class="mobile-app-main" :class="{ 'mobile-app-main--player': isPlayerRoute }">
       <div ref="routeShellRef" class="mobile-route-shell">
@@ -53,11 +56,13 @@
       </div>
     </main>
 
-    <MobileBottomNav
-      v-if="!shouldHideChrome && !isPlayerRoute"
-      :active-tab="activeTab"
-      @select="handleBottomTabSelect"
-    />
+    <Transition name="chrome-bottom-nav">
+      <MobileBottomNav
+        v-if="!shouldHideChrome && !isPlayerRoute"
+        :active-tab="activeTab"
+        @select="handleBottomTabSelect"
+      />
+    </Transition>
 
     <MobileSearchSheet
       :visible="isSearchSheetOpen"
@@ -132,7 +137,6 @@ const isSearchSheetOpen = ref(false);
 const isFollowsSheetOpen = ref(false);
 const isSettingsSheetOpen = ref(false);
 const isPlayerFullscreen = ref(false);
-const lastPlayerRoute = ref<{ name: string; params: Record<string, string> } | null>(null);
 const routeShellRef = ref<HTMLElement | null>(null);
 const activeRouteComponentRef = ref<{
   refreshPageContent?: () => Promise<boolean>;
@@ -240,7 +244,6 @@ const activeTab = computed<MobileTab>(() => {
   if (isSettingsSheetOpen.value) return 'settings';
   if (isFollowsSheetOpen.value) return 'follows';
   if (isSearchSheetOpen.value) return 'search';
-  if (isPlayerRoute.value) return 'player';
   return 'browse';
 });
 
@@ -278,7 +281,6 @@ const pushPlayerRoute = (platform: Platform, roomId: string) => {
   } else {
     target = { name: 'douyuPlayer', params: { roomId } };
   }
-  lastPlayerRoute.value = target;
   router.push(target);
 };
 
@@ -485,11 +487,6 @@ const handleBottomTabSelect = (tab: MobileTab) => {
     isSearchSheetOpen.value = false;
     isFollowsSheetOpen.value = false;
     isSettingsSheetOpen.value = true;
-    return;
-  }
-
-  if (lastPlayerRoute.value) {
-    router.push(lastPlayerRoute.value);
   }
 };
 
@@ -552,7 +549,7 @@ const handleCheckUpdate = async () => {
     const result = await fetchLatestReleaseInfo();
     appVersion.value = result.currentVersion || appVersion.value;
     if (!result.hasUpdate) {
-      updateMessage.value = '当前已经是最新版本 ' + (result.currentVersion || appVersion.value || '5.0.0') + '。';
+      updateMessage.value = '当前已经是最新版本 ' + (result.currentVersion || appVersion.value || '5.2.0') + '。';
       return;
     }
     if (!result.apkAsset) {
@@ -664,6 +661,34 @@ onBeforeUnmount(() => {
 
 .mobile-app-main--player {
   padding-bottom: 0;
+}
+
+.chrome-topbar-enter-active,
+.chrome-topbar-leave-active {
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+  will-change: opacity, transform;
+}
+
+.chrome-topbar-enter-from,
+.chrome-topbar-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+.chrome-bottom-nav-enter-active,
+.chrome-bottom-nav-leave-active {
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+  will-change: opacity, transform;
+}
+
+.chrome-bottom-nav-enter-from,
+.chrome-bottom-nav-leave-to {
+  opacity: 0;
+  transform: translateY(12px);
 }
 
 .mobile-route-shell {
