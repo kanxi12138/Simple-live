@@ -21,6 +21,46 @@
   position: relative;
 }
 
+.player-floating-action-enter-active,
+.player-floating-action-leave-active,
+.player-panel-fade-enter-active,
+.player-panel-fade-leave-active,
+.player-panel-actions-enter-active,
+.player-panel-actions-leave-active {
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
+  will-change: opacity, transform;
+}
+
+.player-floating-action-enter-from,
+.player-floating-action-leave-to {
+  opacity: 0;
+  transform: scale(0.94);
+}
+
+.player-panel-fade-enter-from,
+.player-panel-fade-leave-to,
+.player-panel-actions-enter-from,
+.player-panel-actions-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+.danmu-panel-slide-enter-active,
+.danmu-panel-slide-leave-active {
+  transition:
+    opacity 170ms ease,
+    transform 170ms ease;
+  will-change: opacity, transform;
+}
+
+.danmu-panel-slide-enter-from,
+.danmu-panel-slide-leave-to {
+  opacity: 0;
+  transform: translateX(12px);
+}
+
 /* Web 全屏全局标记下，强制移除页面 padding 与容器圆角 */
 .web-fs-active .player-page {
   padding: 0 !important;
@@ -35,6 +75,7 @@
 /* 主体布局 */
 .player-layout {
   display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   width: 100%;
   height: 100%;
@@ -53,8 +94,8 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  height: 100%;
-  max-height: 100%;
+  height: auto;
+  max-height: none;
   overflow: hidden;
   padding-left: 0;
   box-sizing: border-box;
@@ -281,6 +322,7 @@
 .xgplayer-refresh-control,
 .xgplayer-quality-control,
 .xgplayer-line-control,
+.xgplayer-background-audio-control,
 .xgplayer-danmu-toggle,
 .xgplayer-danmu-settings,
 .xgplayer-volume-control {
@@ -300,6 +342,7 @@
 .xgplayer-refresh-control:hover,
 .xgplayer-quality-control:hover,
 .xgplayer-line-control:hover,
+.xgplayer-background-audio-control:hover,
 .xgplayer-danmu-toggle:hover,
 .xgplayer-danmu-settings:hover,
 .xgplayer-volume-control:hover {
@@ -319,6 +362,7 @@
 .xgplayer-refresh-control svg,
 .xgplayer-quality-control svg,
 .xgplayer-line-control svg,
+.xgplayer-background-audio-control svg,
 .xgplayer-danmu-toggle svg,
 .xgplayer-danmu-settings svg,
 .xgplayer-volume-control svg {
@@ -418,6 +462,65 @@
   transform: translateX(15px);
   background: #1a1a1a;
   box-shadow: 0 0 10px rgba(255, 255, 255, 0.45);
+}
+
+.xgplayer-background-audio-control {
+  display: none;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.xgplayer-is-fullscreen .xgplayer-background-audio-control,
+.xgplayer-is-cssfullscreen .xgplayer-background-audio-control {
+  display: inline-flex;
+}
+
+.xgplayer-background-audio-control .background-audio-switch {
+  position: relative;
+  width: 30px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.xgplayer-background-audio-control .switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  transition: background 0.2s ease;
+}
+
+.xgplayer-background-audio-control .switch-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
+  transform: translateX(1px);
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s ease;
+}
+
+.xgplayer-background-audio-control.is-enabled .switch-track {
+  background: var(--player-accent-gradient);
+}
+
+.xgplayer-background-audio-control.is-enabled .switch-thumb {
+  background: #1a1a1a;
+  transform: translateX(15px);
+}
+
+.xgplayer xg-icon {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.xgplayer xg-icon:active {
+  color: var(--pressed-content-color) !important;
+}
+
+.xgplayer xg-icon:active svg {
+  color: inherit !important;
 }
 
 .xgplayer-volume-control {
@@ -786,10 +889,10 @@
 
 /* 弹幕面板 */
 .danmu-panel {
-  width: 280px;
-  height: 100%;
+  width: 100%;
+  height: 220px;
   min-height: 0;
-  flex: 0 0 280px;
+  flex: 0 0 220px;
   margin-right: 0;
   display: flex;
   flex-direction: column;
@@ -801,7 +904,9 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     0 14px 32px rgba(3, 8, 20, 0.24);
-  transition: opacity 0.25s ease;
+  transition:
+    opacity 170ms ease,
+    transform 170ms ease;
 }
 
 .danmu-panel:hover {
@@ -1010,8 +1115,7 @@ html.web-fs-active .danmu-panel {
   gap: 8px;
 }
 
-.danmu-filter-toggle-btn,
-.danmu-collapse-btn {
+.danmu-filter-toggle-btn {
   border: none;
   border-radius: 999px;
   width: 40px;
@@ -1028,8 +1132,7 @@ html.web-fs-active .danmu-panel {
   transition: background-color 0.2s ease, transform 0.2s ease;
 }
 
-.danmu-filter-toggle-btn:hover,
-.danmu-collapse-btn:hover {
+.danmu-filter-toggle-btn:hover {
   background: rgba(72, 80, 88, 0.86);
   color: rgba(255, 255, 255, 1);
   transform: translateY(-1px);
@@ -1038,96 +1141,6 @@ html.web-fs-active .danmu-panel {
 .danmu-filter-toggle-btn svg {
   width: 18px;
   height: 18px;
-}
-
-.player-compact-island {
-  position: absolute;
-  top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 70;
-  width: min(560px, calc(100% - 170px));
-  min-height: 44px;
-  border-radius: 999px;
-  background: rgba(23, 28, 34, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.26);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 10px 6px 8px;
-  backdrop-filter: blur(12px) saturate(1.15);
-  -webkit-backdrop-filter: blur(12px) saturate(1.15);
-}
-
-.compact-island-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.compact-avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.1);
-  flex: 0 0 auto;
-}
-
-.compact-avatar--fallback {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #f8fafc;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.compact-meta {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.compact-name {
-  color: rgba(248, 250, 252, 0.96);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.compact-title {
-  color: rgba(203, 213, 225, 0.88);
-  font-size: 11px;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.compact-expand-btn {
-  border: none;
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  color: rgba(248, 250, 252, 0.96);
-  background: rgba(148, 163, 184, 0.22);
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  flex: 0 0 auto;
-}
-
-.compact-expand-btn:hover {
-  background: rgba(148, 163, 184, 0.3);
 }
 
 /* 空播放器状态 */
@@ -1381,7 +1394,6 @@ html.web-fs-active .danmu-panel {
 /* 响应式样式 */
 @media (max-width: 1024px) {
   .player-layout {
-    flex-direction: column;
     gap: 12px;
     padding-right: 0;
   }
@@ -1389,7 +1401,7 @@ html.web-fs-active .danmu-panel {
   .danmu-panel {
     width: 100%;
     height: 220px;
-    flex-basis: 220px;
+    flex: 0 0 220px;
     margin-right: 0;
     border-radius: 18px;
     border-left: 1px solid rgba(255, 255, 255, 0.08);
@@ -1517,49 +1529,13 @@ html.web-fs-active .danmu-panel {
   background: transparent;
 }
 
-:root[data-theme="light"] .player-compact-island {
-  background: rgba(248, 250, 252, 0.9);
-  border-color: #ffffff;
-  box-shadow:
-    0 3px 8px rgba(15, 23, 42, 0.08),
-    0 10px 20px rgba(15, 23, 42, 0.08);
-}
-
-:root[data-theme="light"] .compact-avatar {
-  border-color: rgba(148, 163, 184, 0.4);
-  background: rgba(148, 163, 184, 0.22);
-}
-
-:root[data-theme="light"] .compact-avatar--fallback {
-  color: #0f172a;
-}
-
-:root[data-theme="light"] .compact-name {
-  color: #111827;
-}
-
-:root[data-theme="light"] .compact-title {
-  color: #475569;
-}
-
-:root[data-theme="light"] .compact-expand-btn {
-  color: #0f172a;
-  background: rgba(148, 163, 184, 0.24);
-}
-
-:root[data-theme="light"] .compact-expand-btn:hover {
-  background: rgba(148, 163, 184, 0.34);
-}
-
-:root[data-theme="light"] .danmu-filter-toggle-btn,
-:root[data-theme="light"] .danmu-collapse-btn {
+:root[data-theme="light"] .danmu-filter-toggle-btn {
   color: #111827;
   background: rgba(248, 250, 252, 0.92);
   border: 1px solid #ffffff;
 }
 
-:root[data-theme="light"] .danmu-filter-toggle-btn:hover,
-:root[data-theme="light"] .danmu-collapse-btn:hover {
+:root[data-theme="light"] .danmu-filter-toggle-btn:hover {
   background: rgba(241, 245, 249, 0.98);
 }
 

@@ -15,7 +15,6 @@ export interface DanmakuManagerContext {
   danmakuMessages: Ref<DanmakuMessage[]>;
   isDanmuEnabled: Ref<boolean>;
   danmuSettings: DanmuUserSettings;
-  isDanmuListCollapsed: Ref<boolean>;
   isFullScreen: Ref<boolean>;
   isDanmakuListenerActive: Ref<boolean>;
   unlistenDanmakuFn: Ref<(() => void) | null>;
@@ -92,7 +91,7 @@ export const startCurrentDanmakuListener = async (
         lastOverlayEmitAt = now;
         return true;
       },
-      shouldAppendToList: () => !ctx.isDanmuListCollapsed.value && !ctx.isFullScreen.value,
+      shouldAppendToList: () => !ctx.isFullScreen.value,
       buildCommentOptions: () => ({
         duration: ctx.danmuSettings.duration,
         mode: ctx.danmuSettings.mode,
@@ -114,7 +113,7 @@ export const startCurrentDanmakuListener = async (
 
     if (stopFn) {
       ctx.unlistenDanmakuFn.value = stopFn;
-      if (!ctx.isDanmuListCollapsed.value && !ctx.isFullScreen.value) {
+      if (!ctx.isFullScreen.value) {
         const successMessage: DanmakuMessage = {
           id: `system-conn-${Date.now()}`,
           nickname: '系统消息',
@@ -133,7 +132,7 @@ export const startCurrentDanmakuListener = async (
     console.error(`[Player] Failed to start danmaku listener for ${platform}/${roomId}:`, error);
     ctx.isDanmakuListenerActive.value = false;
 
-    if (!ctx.isDanmuListCollapsed.value && !ctx.isFullScreen.value) {
+    if (!ctx.isFullScreen.value) {
       const errorMessage: DanmakuMessage = {
         id: `system-err-${Date.now()}`,
         nickname: '系统消息',
