@@ -15,9 +15,9 @@
 </template>
 
 <script setup lang="ts">
-import { Heart, MonitorPlay, Radar, Search, Settings2 } from 'lucide-vue-next';
+import { Heart, Radar, Search, Settings2 } from 'lucide-vue-next';
 
-export type MobileTab = 'browse' | 'search' | 'follows' | 'player' | 'settings';
+export type MobileTab = 'browse' | 'search' | 'follows' | 'settings';
 
 defineProps<{
   activeTab: MobileTab;
@@ -31,7 +31,6 @@ const items = [
   { id: 'browse', label: '发现', icon: Radar },
   { id: 'search', label: '搜索', icon: Search },
   { id: 'follows', label: '关注', icon: Heart },
-  { id: 'player', label: '播放', icon: MonitorPlay },
   { id: 'settings', label: '设置', icon: Settings2 },
 ] as const;
 </script>
@@ -44,14 +43,14 @@ const items = [
   left: 0;
   z-index: 45;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   padding:
     10px 14px
     calc(var(--mobile-bottom-nav-safe-gap) + env(safe-area-inset-bottom));
   background: var(--mobile-topbar-bg);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border-top: 1px solid var(--mobile-topbar-border);
   min-height: var(--mobile-bottom-nav-height);
 }

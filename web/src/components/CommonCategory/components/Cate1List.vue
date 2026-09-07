@@ -5,8 +5,13 @@
         v-for="cate1 in cate1List"
         :key="cate1.href"
         class="cate1-item"
+        role="button"
+        tabindex="0"
+        :aria-pressed="cate1.href === selectedCate1Href"
         :class="{ selected: cate1.href === selectedCate1Href }"
         @click="$emit('select', cate1)"
+        @keydown.enter.prevent="$emit('select', cate1)"
+        @keydown.space.prevent="$emit('select', cate1)"
       >
         <span class="cate1-name">{{ cate1.title }}</span>
       </li>
@@ -48,6 +53,7 @@ defineProps<{
 }
 
 .cate1-item {
+  -webkit-tap-highlight-color: transparent;
   height: 28px;
   padding: 0 2px;
   display: inline-flex;

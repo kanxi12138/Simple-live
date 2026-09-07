@@ -1,15 +1,15 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import DouyuHomeView from '../pages/DouyuHomeView.vue'
-import DouyinHomeView from '../pages/DouyinHomeView.vue'
-import DouyuPlayerView from '../pages/DouyuPlayerView.vue';
-import DouyinPlayerView from '../pages/DouyinPlayerView.vue';
-import HuyaHomeView from '../pages/HuyaHomeView.vue'
-import HuyaPlayerView from '../pages/HuyaPlayerView.vue'
-import BilibiliHomeView from '../pages/BilibiliHomeView.vue'
-import BilibiliPlayerView from '../pages/BilibiliPlayerView.vue'
-import CustomHomeView from '../pages/CustomHomeView.vue'
-import CustomM3u8HomeView from '../pages/CustomM3u8HomeView.vue'
-import CustomM3u8PlayerView from '../pages/CustomM3u8PlayerView.vue'
+const DouyuHomeView = () => import('../pages/DouyuHomeView.vue');
+const DouyinHomeView = () => import('../pages/DouyinHomeView.vue');
+const DouyuPlayerView = () => import('../pages/DouyuPlayerView.vue');
+const DouyinPlayerView = () => import('../pages/DouyinPlayerView.vue');
+const HuyaHomeView = () => import('../pages/HuyaHomeView.vue');
+const HuyaPlayerView = () => import('../pages/HuyaPlayerView.vue');
+const BilibiliHomeView = () => import('../pages/BilibiliHomeView.vue');
+const BilibiliPlayerView = () => import('../pages/BilibiliPlayerView.vue');
+const CustomHomeView = () => import('../pages/CustomHomeView.vue');
+const CustomM3u8HomeView = () => import('../pages/CustomM3u8HomeView.vue');
+const CustomM3u8PlayerView = () => import('../pages/CustomM3u8PlayerView.vue');
 
 const router = createRouter({
   history: createWebHistory(),
