@@ -15,6 +15,9 @@ import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -34,8 +37,16 @@ private const val MIN_PACKET_BODY_SIZE = 9
 
 class MainActivity : TauriActivity() {
   private var playerWebView: WebView? = null
+  private var isImmersiveFullscreen = false
   private lateinit var backPressedCallback: OnBackPressedCallback
   private val douyuDanmakuBridge = DouyuDanmakuBridge()
+  private val douyinLoginBridge by lazy {
+    DouyinLoginBridge(this) {
+      playerWebView?.evaluateJavascript(
+        "window.dispatchEvent(new Event('dtv-douyin-login-closed'));", null,
+      )
+    }
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
@@ -72,8 +83,16 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onDestroy() {
+    douyinLoginBridge.close()
     douyuDanmakuBridge.stop()
     super.onDestroy()
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (hasFocus && isImmersiveFullscreen) {
+      hideSystemBars()
+    }
   }
 
   override fun onWebViewCreate(webView: WebView) {
@@ -83,10 +102,12 @@ class MainActivity : TauriActivity() {
     webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
     webView.settings.allowFileAccessFromFileURLs = true
     webView.settings.allowUniversalAccessFromFileURLs = true
+    webView.settings.mediaPlaybackRequiresUserGesture = false
     webView.addJavascriptInterface(OrientationBridge(), "DTVOrientation")
     webView.addJavascriptInterface(UpdateBridge(), "DTVUpdate")
     webView.addJavascriptInterface(DebugBridge(), "DTVDebug")
     webView.addJavascriptInterface(douyuDanmakuBridge, "DTVDouyuDanmaku")
+    webView.addJavascriptInterface(douyinLoginBridge, "DTVDouyinLogin")
   }
 
   private fun fallbackBackPressed() {
@@ -95,17 +116,45 @@ class MainActivity : TauriActivity() {
     backPressedCallback.isEnabled = true
   }
 
+  private fun enterImmersiveFullscreen() {
+    isImmersiveFullscreen = true
+    hideSystemBars()
+  }
+
+  private fun exitImmersiveFullscreen() {
+    isImmersiveFullscreen = false
+    WindowCompat.getInsetsController(window, window.decorView)
+      .show(WindowInsetsCompat.Type.systemBars())
+  }
+
+  private fun hideSystemBars() {
+    val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+    insetsController.systemBarsBehavior =
+      WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    insetsController.hide(WindowInsetsCompat.Type.systemBars())
+  }
+
   private inner class OrientationBridge {
     @JavascriptInterface
-    fun setLandscape() {
+    fun enterLandscapeFullscreen() {
       runOnUiThread {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        enterImmersiveFullscreen()
       }
     }
 
     @JavascriptInterface
-    fun setPortrait() {
+    fun enterPortraitFullscreen() {
       runOnUiThread {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        enterImmersiveFullscreen()
+      }
+    }
+
+    @JavascriptInterface
+    fun exitFullscreen() {
+      runOnUiThread {
+        exitImmersiveFullscreen()
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
       }
     }
@@ -176,6 +225,7 @@ class MainActivity : TauriActivity() {
       .build()
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    @Volatile private var connectionGeneration = 0L
     private var webSocket: WebSocket? = null
     private var currentRoomId: String? = null
     private var pendingBuffer = ByteArrayOutputStream()
@@ -204,6 +254,7 @@ class MainActivity : TauriActivity() {
         }
 
         stop()
+        val generation = connectionGeneration
         currentRoomId = normalizedRoomId
         pendingBuffer = ByteArrayOutputStream()
         Log.i("DouyuDanmaku", "start room=$normalizedRoomId")
@@ -215,30 +266,35 @@ class MainActivity : TauriActivity() {
 
         webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
           override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (generation != connectionGeneration) return
             Log.i("DouyuDanmaku", "open room=$normalizedRoomId")
             dispatchDanmakuStatus("open", normalizedRoomId, "websocket opened")
-            sendPacket("type@=loginreq/roomid@=$normalizedRoomId/")
-            sendPacket("type@=joingroup/rid@=$normalizedRoomId/gid@=-9999/")
+            webSocket.send(ByteString.of(*encodePacket("type@=loginreq/roomid@=$normalizedRoomId/")))
+            webSocket.send(ByteString.of(*encodePacket("type@=joingroup/rid@=$normalizedRoomId/gid@=-9999/")))
             mainHandler.removeCallbacks(heartbeatRunnable)
             mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS)
           }
 
           override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            if (generation != connectionGeneration) return
             dispatchDanmakuStatus("message", normalizedRoomId, "bytes=${bytes.size}")
             handleIncomingBytes(normalizedRoomId, bytes.toByteArray())
           }
 
           override fun onMessage(webSocket: WebSocket, text: String) {
+            if (generation != connectionGeneration) return
             dispatchDanmakuStatus("message", normalizedRoomId, "text=${text.length}")
             handleIncomingBytes(normalizedRoomId, text.toByteArray(StandardCharsets.UTF_8))
           }
 
           override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (generation != connectionGeneration) return
             Log.e("DouyuDanmaku", "failure room=$normalizedRoomId message=${t.message}")
             dispatchDanmakuStatus("error", normalizedRoomId, t.message ?: "unknown")
           }
 
           override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (generation != connectionGeneration) return
             Log.w("DouyuDanmaku", "closed room=$normalizedRoomId code=$code reason=$reason")
             dispatchDanmakuStatus("closed", normalizedRoomId, "code=$code reason=$reason")
             mainHandler.removeCallbacks(heartbeatRunnable)
@@ -252,8 +308,9 @@ class MainActivity : TauriActivity() {
 
     @JavascriptInterface
     fun stop() {
+      connectionGeneration += 1
       mainHandler.removeCallbacks(heartbeatRunnable)
-      webSocket?.close(1000, "client-stop")
+      webSocket?.cancel()
       webSocket = null
       currentRoomId = null
       pendingBuffer = ByteArrayOutputStream()
@@ -271,8 +328,10 @@ class MainActivity : TauriActivity() {
 
       while (cursor + PACKET_HEADER_SIZE <= data.size) {
         val packetLength = readLittleEndianInt(data, cursor)
-        if (packetLength < MIN_PACKET_BODY_SIZE) {
-          break
+        if (packetLength < MIN_PACKET_BODY_SIZE || packetLength != readLittleEndianInt(data, cursor + 4)) {
+          pendingBuffer = ByteArrayOutputStream()
+          dispatchDanmakuStatus("error", roomId, "invalid packet length")
+          return
         }
 
         val frameEnd = cursor + 4 + packetLength
@@ -285,6 +344,7 @@ class MainActivity : TauriActivity() {
         val body = String(data, bodyStart, bodyLength, StandardCharsets.UTF_8).trimEnd('\u0000')
         for (part in body.split("//")) {
           val parsed = parseStt(part)
+          if (parsed["type"] == "loginres") dispatchDanmakuStatus("ready", roomId, "login accepted")
           if (parsed["type"] == "chatmsg" && !parsed["txt"].isNullOrBlank() && !parsed["dms"].isNullOrBlank()) {
             emitDanmaku(roomId, parsed)
           }

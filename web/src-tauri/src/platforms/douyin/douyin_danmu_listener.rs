@@ -1,3 +1,4 @@
+use tauri::Emitter;
 use crate::platforms::douyin::web_api::normalize_douyin_live_id;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::time::{sleep, Duration};
@@ -60,10 +61,10 @@ pub async fn start_douyin_danmu_listener(
         loop {
             let result = async {
                 let mut fetcher = crate::platforms::douyin::danmu::web_fetcher::DouyinLiveWebFetcher::new(&room_id_str_clone)?;
-                fetcher
-                    .fetch_room_details()
-                    .await
-                    .map_err(|e| format!("Failed to fetch room details: {}", e))?;
+                tokio::select! {
+                    _ = rx_shutdown.recv() => return Ok(ConnectionOutcome::Stop),
+                    result = fetcher.fetch_room_details() => result?,
+                }
 
                 let actual_room_id = fetcher.get_room_id().await?;
                 let cookie_header = fetcher.get_dy_cookie().await?;
@@ -73,13 +74,15 @@ pub async fn start_douyin_danmu_listener(
                     actual_room_id, user_unique_id
                 );
 
-                let (read_stream, ack_tx, shutdown_tx) = crate::platforms::douyin::danmu::websocket_connection::connect_and_manage_websocket(
+                let (read_stream, ack_tx, shutdown_tx) = tokio::select! {
+                    _ = rx_shutdown.recv() => return Ok(ConnectionOutcome::Stop),
+                    result = crate::platforms::douyin::danmu::websocket_connection::connect_and_manage_websocket(
                     &fetcher,
                     &actual_room_id,
                     &cookie_header,
                     &user_unique_id,
-                )
-                .await?;
+                ) => result?,
+                };
 
                 println!(
                     "[Douyin Danmaku] WebSocket connected for room: {}",
@@ -92,7 +95,7 @@ pub async fn start_douyin_danmu_listener(
                         read_stream,
                         ack_tx,
                         app_handle_clone.clone(),
-                        actual_room_id.clone()
+                        room_id_str_clone.clone()
                     ) => {
                         let _ = shutdown_tx_for_msg.send(true);
                         if let Err(e) = res {
@@ -115,12 +118,18 @@ pub async fn start_douyin_danmu_listener(
             match result {
                 Ok(ConnectionOutcome::Stop) => break,
                 Ok(ConnectionOutcome::Disconnected) => {
+                    if let Err(emit_error) = app_handle_clone.emit("danmaku-status", serde_json::json!({
+                        "room_id": room_id_str_clone, "platform": "douyin", "status": "error", "message": "弹幕连接断开，正在重连"
+                    })) { log::error!("Cannot emit danmaku error: {emit_error}"); }
                     eprintln!(
                         "[Douyin Danmaku] Disconnected, retrying in {}s.",
                         backoff_secs
                     );
                 }
                 Err(e) => {
+                    if let Err(emit_error) = app_handle_clone.emit("danmaku-status", serde_json::json!({
+                        "room_id": room_id_str_clone, "platform": "douyin", "status": "error", "message": e.to_string()
+                    })) { log::error!("Cannot emit danmaku error: {emit_error}"); }
                     eprintln!(
                         "[Douyin Danmaku] Connection error: {}. Retrying in {}s.",
                         e, backoff_secs

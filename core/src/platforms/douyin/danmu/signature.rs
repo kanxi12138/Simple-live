@@ -49,7 +49,8 @@ fn evaluate_sign_js(md5_param: &str) -> Result<String, Box<dyn std::error::Error
             e
         })?;
 
-    let call_script = format!("get_sign('{}')", md5_param);
+    let user_agent = serde_json::to_string(crate::platforms::douyin::web_api::DEFAULT_USER_AGENT)?;
+    let call_script = format!("getMSSDKSignature('{md5_param}', {user_agent})");
     let fast_call_script = FastString::from(call_script);
     let result = runtime
         .execute_script("[call_get_sign]", fast_call_script)
@@ -89,7 +90,8 @@ fn evaluate_sign_js(md5_param: &str) -> Result<String, Box<dyn std::error::Error
         .eval(SIGN_JS_CONTENT)
         .map_err(|e| format!("Error during quick-js eval of sign.js: {e}"))?;
 
-    let call_script = format!("get_sign('{}')", md5_param);
+    let user_agent = serde_json::to_string(crate::platforms::douyin::web_api::DEFAULT_USER_AGENT)?;
+    let call_script = format!("getMSSDKSignature('{md5_param}', {user_agent})");
     context
         .eval_as::<String>(&call_script)
         .map_err(|e| format!("Error during quick-js call to get_sign: {e}").into())
@@ -137,9 +139,12 @@ pub async fn generate_signature(
     let md5_param = format!("{:x}", digest_bytes);
     println!("[Rust] MD5 param for signature: {}", md5_param);
 
-    let signature = evaluate_sign_js(&md5_param)?;
-    println!("[Rust] Final signature: {}", signature);
-    Ok(signature)
+    const SIGNATURE_ATTEMPTS: usize = 16;
+    for _ in 0..SIGNATURE_ATTEMPTS {
+        let signature = evaluate_sign_js(&md5_param)?;
+        if !signature.contains(['-', '=']) { return Ok(signature); }
+    }
+    Err("抖音 WebSocket 签名生成失败".into())
 }
 
 pub fn generate_ms_token(length: usize) -> String {

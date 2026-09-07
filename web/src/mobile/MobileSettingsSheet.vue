@@ -5,7 +5,7 @@
         <div class="sheet-header">
           <div>
             <strong>设置与迁移</strong>
-            <p>保留配置导入导出，移动端改成文件流方案。</p>
+            <p>备份关注与偏好，或从已有备份恢复。</p>
           </div>
           <button
             type="button"
@@ -198,7 +198,7 @@ const handleConfirmImport = () => {
 
 .sheet-header p {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--mobile-text-secondary);
 }
 
@@ -241,7 +241,7 @@ const handleConfirmImport = () => {
   display: block;
   margin-top: 4px;
   color: var(--mobile-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -275,7 +275,7 @@ const handleConfirmImport = () => {
 
 .update-message {
   margin: 10px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--mobile-text-secondary);
 }
 
@@ -335,7 +335,7 @@ const handleConfirmImport = () => {
 
 .status {
   margin: 14px 0 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .status--info {
@@ -402,7 +402,7 @@ const handleConfirmImport = () => {
   border-radius: 10px;
   background: var(--mobile-surface-muted);
   color: var(--mobile-text-primary);
-  font-size: 12px;
+  font-size: 13px;
   font-family: monospace;
   resize: vertical;
   outline: none;
@@ -411,5 +411,34 @@ const handleConfirmImport = () => {
 
 .import-textarea:focus {
   border-color: var(--accent);
+}
+
+.close-btn:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+button:active:not(:disabled) {
+  background-color: var(--mobile-pill-active-bg);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sheet-header strong {
+  line-height: 1.4;
+}
+
+.sheet-header p {
+  line-height: 1.6;
 }
 </style>

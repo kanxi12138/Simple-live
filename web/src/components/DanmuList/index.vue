@@ -37,6 +37,7 @@
 
         <div
           v-for="(danmaku, idx) in renderMessages"
+          :data-message-index="idx"
           :key="danmaku.id || `${danmaku.room_id || ''}-${danmaku.nickname}-${danmaku.content}-${idx}`" 
           :class="['danmu-item', { 'system-message': danmaku.isSystem, 'success': danmaku.isSystem && danmaku.type === 'success' }]"
           @click="copyDanmaku(danmaku)"
@@ -86,7 +87,6 @@ const props = defineProps<{
 
 const danmakuListEl = ref<HTMLElement | null>(null);
 const autoScroll = ref(true); 
-const userScrolled = ref(false);
 const pointerActive = ref(false);
 
 const showFilterPanel = ref(false);
@@ -110,105 +110,105 @@ const userColor = (nickname: string | undefined) => {
     return `hsl(${hue}, 70%, 75%)`;
   };
   
+const BOTTOM_THRESHOLD = 40;
+const MAX_MSG = 200;
+const renderMessages = ref<DanmakuUIMessage[]>([]);
+let scrollFrame: number | null = null;
+let renderPending = false;
+let disposed = false;
+
 const isNearBottom = () => {
-  const el = danmakuListEl.value;
-  if (!el) return true;
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= 40;
+  const element = danmakuListEl.value;
+  return !element
+    || element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_THRESHOLD;
 };
 
 const handleScroll = () => {
-  if (!danmakuListEl.value) return;
-  const atBottom = isNearBottom();
-  userScrolled.value = !atBottom;
-  autoScroll.value = atBottom && !pointerActive.value;
+  if (!renderPending) autoScroll.value = isNearBottom() && !pointerActive.value;
 };
-  
-watch(autoScroll, (newValue) => {
-  if (newValue) {
-    userScrolled.value = false;
-    scrollToBottomForce();
-  }
-});
-  
-  const renderMessages = ref<DanmakuUIMessage[]>([]);
-  const MAX_MSG = 200;
-  const PRUNE_BATCH = 100;
-  
+
 const onPointerDown = () => {
   pointerActive.value = true;
-  autoScroll.value = false; // 用户主动拖动时暂停自动滚动
-  userScrolled.value = true;
+  autoScroll.value = false;
 };
-  
-  const onGlobalPointerUp = () => {
-    if (pointerActive.value) {
-      pointerActive.value = false;
-      autoScroll.value = true; // 松开后恢复自动滚动
-      userScrolled.value = false;
-      scrollToBottomForce();
+
+const scrollToBottom = () => {
+  if (scrollFrame !== null || disposed) return;
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = null;
+    if (autoScroll.value && !pointerActive.value && danmakuListEl.value) {
+      danmakuListEl.value.scrollTop = danmakuListEl.value.scrollHeight;
     }
-  };
-  
-  const scrollToBottomForce = () => {
-    nextTick(() => {
-      const el = danmakuListEl.value;
-      if (!el) return;
-      // 使用 scrollTo({behavior: 'auto'}) 替代平滑滚动，确保锚点准确
-      requestAnimationFrame(() => {
-        el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
-        requestAnimationFrame(() => {
-          el.scrollTop = el.scrollHeight; // 双重同步确保
-        });
-      });
-    });
-  };
+  });
+};
 
-watch(() => props.messages, (newMessages, _oldMessages) => {
-  const msgs = Array.isArray(newMessages) ? newMessages : [];
-  const filtered = filterBlockedMessages(msgs);
-  if (filtered.length > MAX_MSG) {
-    // 批量裁剪，避免频繁处理导致性能问题
-    if (filtered.length % PRUNE_BATCH === 0 || filtered.length > MAX_MSG + PRUNE_BATCH) {
-      renderMessages.value = filtered.slice(-MAX_MSG);
-    } else {
-      renderMessages.value = filtered.slice(-MAX_MSG);
+const onGlobalPointerUp = () => {
+  if (!pointerActive.value) return;
+  pointerActive.value = false;
+  autoScroll.value = isNearBottom();
+  if (autoScroll.value) scrollToBottom();
+};
+
+// Retain a surviving visible message when the oldest messages are pruned.
+const captureReadingAnchor = (messages: DanmakuUIMessage[]) => {
+  const element = danmakuListEl.value;
+  if (!element) return null;
+  const top = element.getBoundingClientRect().top;
+  const items = Array.from(element.querySelectorAll<HTMLElement>('.danmu-item'));
+  const anchor = items.find((item) => {
+    const message = renderMessages.value[Number(item.dataset.messageIndex)];
+    return item.getBoundingClientRect().bottom > top && messages.includes(message);
+  });
+  if (!anchor) return null;
+  return {
+    message: renderMessages.value[Number(anchor.dataset.messageIndex)],
+    offset: anchor.getBoundingClientRect().top - top,
+  };
+};
+
+const updateRenderedMessages = () => {
+  const messages = filterBlockedMessages(props.messages ?? []).slice(-MAX_MSG);
+  const anchor = autoScroll.value ? null : captureReadingAnchor(messages);
+  renderPending = true;
+  renderMessages.value = messages;
+  nextTick(() => {
+    renderPending = false;
+    if (disposed) return;
+    if (autoScroll.value && !pointerActive.value) {
+      scrollToBottom();
+      return;
     }
-  } else {
-    renderMessages.value = filtered;
-  }
-  if (!pointerActive.value) {
-    scrollToBottomForce();
-  } else if (autoScroll.value || isNearBottom()) {
-    scrollToBottomForce();
-  }
-}, { deep: true });
+    const element = danmakuListEl.value;
+    if (!anchor || !element) return;
+    const index = renderMessages.value.indexOf(anchor.message);
+    const item = element.querySelector<HTMLElement>(`[data-message-index="${index}"]`);
+    if (item) {
+      element.scrollTop += item.getBoundingClientRect().top
+        - element.getBoundingClientRect().top - anchor.offset;
+    }
+  });
+};
 
-watch(blockedKeywords, () => {
-  const msgs = Array.isArray(props.messages) ? props.messages : [];
-  const filtered = filterBlockedMessages(msgs);
-  renderMessages.value = filtered.length > MAX_MSG ? filtered.slice(-MAX_MSG) : filtered;
-  if (!pointerActive.value || autoScroll.value || isNearBottom()) {
-    scrollToBottomForce();
-  }
-}, { deep: true });
+watch([() => props.messages, blockedKeywords], updateRenderedMessages, { deep: true });
 
-watch(() => props.roomId, (_newRoomId, _oldRoomId) => {
-  userScrolled.value = false;
+watch(() => props.roomId, () => {
   autoScroll.value = true;
-  scrollToBottomForce();
-});
-
-onMounted(() => {
-  scrollToBottomForce();
+  pointerActive.value = false;
+  nextTick(scrollToBottom);
 });
 
 onMounted(() => {
   window.addEventListener('pointerup', onGlobalPointerUp);
+  window.addEventListener('pointercancel', onGlobalPointerUp);
   loadBlockedKeywords();
+  updateRenderedMessages();
 });
 
 onUnmounted(() => {
+  disposed = true;
+  if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
   window.removeEventListener('pointerup', onGlobalPointerUp);
+  window.removeEventListener('pointercancel', onGlobalPointerUp);
 });
 
 const toggleFilterPanel = () => {
@@ -464,7 +464,8 @@ const copyDanmaku = async (danmaku: DanmakuUIMessage) => {
     max-height: 100%;
     overflow-y: auto; 
     padding: 10px 12px;
-    scroll-behavior: smooth;
+    scroll-behavior: auto;
+    overflow-anchor: none;
   }
   
   .empty-danmu-placeholder {

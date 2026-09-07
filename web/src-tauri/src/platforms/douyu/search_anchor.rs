@@ -1,4 +1,4 @@
-use md5::Digest;
+use rand::RngCore;
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use reqwest::{
     header::{HeaderMap, HeaderValue},
@@ -7,7 +7,6 @@ use reqwest::{
 };
 use serde::Serialize;
 use serde_json::Value;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const DOUYU_SEARCH_REFERER: &str = "https://www.douyu.com/search/";
 const DOUYU_SEARCH_USER_AGENT: &str =
@@ -63,14 +62,9 @@ fn build_search_client() -> Result<Client, reqwest::Error> {
 }
 
 fn build_search_did() -> Result<String, Box<dyn std::error::Error>> {
-    let mut hasher = md5::Md5::new();
-    hasher.update(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_nanos()
-            .to_string(),
-    );
-    Ok(format!("{:x}", hasher.finalize()))
+    let mut device_id = [0_u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut device_id);
+    Ok(hex::encode(device_id))
 }
 
 async fn fetch_search_room_results(
@@ -87,7 +81,7 @@ async fn fetch_search_room_results(
         .and_then(|item| item.get("relateShow"))
         .and_then(Value::as_array)
         .cloned()
-        .unwrap_or_default();
+        .ok_or("斗鱼搜索响应缺少结果列表")?;
 
     Ok(items
         .iter()
@@ -203,7 +197,8 @@ fn map_anchor_search_item(item: &Value) -> Option<DouyuSearchResultItem> {
             .get("avatar")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
-        live_status: is_live && !is_loop,
+        live_status: is_live && !is_loop
+            && anchor_info.get("roomType").and_then(value_to_i64).unwrap_or(0) == 0,
         category: anchor_info
             .get("cateName")
             .and_then(Value::as_str)
