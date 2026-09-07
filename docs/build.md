@@ -1,36 +1,45 @@
-# Build Notes
+# Windows arm64 release 构建
 
-## Frontend
+所有命令从仓库根目录执行。使用 Node/npm、Rust Android arm64 target、JDK、Android SDK 和 NDK；SDK、NDK 路径由当前机器配置。`core` 是 Rust 修改源，`web/src-tauri` 为同步镜像。
 
-```powershell
-cd D:\Claude_Code\DTV mobile\.android\web
-npm install
-npm run build
-```
-
-## Sync Rust core
+## 前端和 Android 工程
 
 ```powershell
-cd D:\Claude_Code\DTV mobile\.android\web
-npm run android:sync
+npm.cmd --prefix web ci
+npm.cmd --prefix web run build
+powershell -ExecutionPolicy Bypass -File scripts/sync-core.ps1
+npm.cmd --prefix web run android:init
 ```
 
-## Initialize Android project
+初始化后，将保存工程 `app` 中的受版本控制源码和配置复制到 `web/src-tauri/gen/android` 的对应位置，保留初始化产生的文件。不要将生成工程整体反向覆盖保存工程。确保 MainActivity、DouyinLoginBridge、清单、Gradle 配置以及 `app/tauri.properties` 已应用，并且无 BackgroundPlaybackService 旧文件。
+
+将本机 SDK 配置及以下签名属性写入生成工程根目录的 `local.properties`，不要提交该文件或密钥：`release.keystore.path`、`release.keystore.storePassword`、`release.keystore.keyAlias`、`release.keystore.keyPassword`。使用已有 release keystore。
+
+## Rust release 与普通 JNI 文件复制
+
+先配置 `ANDROID_HOME` 和 `NDK_HOME`，后者指向已安装 NDK 目录。以下流程与已完成的 Android API 24 arm64 构建一致：
 
 ```powershell
-cd D:\Claude_Code\DTV mobile\.android\web
-npm run android:init
-powershell -ExecutionPolicy Bypass -File ..\scripts\sync-generated-android.ps1
+$env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "$env:NDK_HOME/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android24-clang.cmd"
+$env:CC_aarch64_linux_android = $env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER
+$env:CXX_aarch64_linux_android = "$env:NDK_HOME/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android24-clang++.cmd"
+$env:AR_aarch64_linux_android = "$env:NDK_HOME/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-ar.exe"
+$env:TAURI_ANDROID_PACKAGE_UNESCAPED = 'www.sp.com'
+cargo build --manifest-path web/src-tauri/Cargo.toml --target aarch64-linux-android --release --lib --features tauri/custom-protocol
+New-Item -ItemType Directory -Force web/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
+Copy-Item web/src-tauri/target/aarch64-linux-android/release/libdtv_lib.so web/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a/libdtv_lib.so -Force
 ```
 
-## Debug run
+JNI 目标必须是普通文件，不能是旧符号链接。`tauri/custom-protocol` 用于嵌入生产前端资源；前端构建应先完成。
+
+## Android 打包
 
 ```powershell
-cd D:\Claude_Code\DTV mobile\.android\web
-npm run android:dev
+Push-Location web/src-tauri/gen/android
+.\gradlew.bat assembleArm64Release --console=plain '-Pkotlin.incremental=false' -x rustBuildArm64Release -x lint -x lintArm64Release -x lintVitalArm64Release -x lintVitalAnalyzeArm64Release -x lintVitalReportArm64Release
+Pop-Location
 ```
 
-## Current limitations
+输出位于 `web/src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk`。使用 aapt 和 apksigner 核对包名 `www.sp.com`、版本 `5.2.1/5002001`、仅 arm64-v8a 及原 release 证书。安装时使用 `adb install -r`，签名不一致则停止，不卸载或清数据。
 
-- This workspace now contains the mobile-oriented source split and Android staging files.
-- Final Android Gradle files still depend on `tauri android init` because the local SDK/NDK and signing environment are machine-specific.
+APK、JNI、构建目录和本地配置不属于源码提交。本次源码整理不重新打包，不运行功能测试、Lint、格式化或性能测试。

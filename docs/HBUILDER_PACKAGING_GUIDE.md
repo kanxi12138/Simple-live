@@ -66,42 +66,42 @@
 ### 2. 安装前端依赖
 
 ```powershell
-cd D:\Claude_Code\DTV mobile\.android\all\web
+cd .\web
 npm install
 ```
 
 ### 3. 同步 Rust core 到 `src-tauri`
 
 ```powershell
-cd D:\Claude_Code\DTV mobile\.android\all\web
+cd .\web
 powershell -ExecutionPolicy Bypass -File ..\scripts\sync-core.ps1
 ```
 
 ### 4. 初始化 Android 工程
 
 ```powershell
-cd D:\Claude_Code\DTV mobile\.android\all\web
+cd .\web
 npm run android:init
 ```
 
 ### 5. 把生成的 Android 工程同步到 `all\app`
 
 ```powershell
-cd D:\Claude_Code\DTV mobile\.android\all\web
+cd .\web
 powershell -ExecutionPolicy Bypass -File ..\scripts\sync-generated-android.ps1
 ```
 
 ### 6. 本地真机/模拟器调试
 
 ```powershell
-cd D:\Claude_Code\DTV mobile\.android\all\web
+cd .\web
 npm run android:dev
 ```
 
 ### 7. 构建安装包
 
 ```powershell
-cd D:\Claude_Code\DTV mobile\.android\all\web
+cd .\web
 npm run android:build
 ```
 
@@ -116,7 +116,7 @@ npm run android:build
 新建目录，例如：
 
 ```text
-D:\Claude_Code\DTV mobile\HBuilder-DTV
+.\HBuilder-DTV
 ```
 
 ### 2. 把 `all\web\dist` 里的内容拷进去
@@ -129,7 +129,7 @@ D:\Claude_Code\DTV mobile\HBuilder-DTV
 来源：
 
 ```text
-D:\Claude_Code\DTV mobile\.android\all\web\dist
+.\web\dist
 ```
 
 ### 3. 在 HBuilder 项目根目录创建 `manifest.json`
