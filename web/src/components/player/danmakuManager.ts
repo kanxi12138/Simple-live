@@ -1,3 +1,4 @@
+import { listen } from '@tauri-apps/api/event';
 import type { Ref } from 'vue';
 
 import { Platform as StreamingPlatform } from '../../platforms/common/types';
@@ -15,7 +16,6 @@ export interface DanmakuManagerContext {
   danmakuMessages: Ref<DanmakuMessage[]>;
   isDanmuEnabled: Ref<boolean>;
   danmuSettings: DanmuUserSettings;
-  isDanmuListCollapsed: Ref<boolean>;
   isFullScreen: Ref<boolean>;
   isDanmakuListenerActive: Ref<boolean>;
   unlistenDanmakuFn: Ref<(() => void) | null>;
@@ -54,12 +54,15 @@ const isBlockedMessage = (message?: DanmakuMessage) => {
   return keywords.some((kw) => content.includes(kw));
 };
 
-export const startCurrentDanmakuListener = async (
+const startListener = async (
   ctx: DanmakuManagerContext,
   platform: StreamingPlatform,
   roomId: string,
   getDanmuOverlay: () => DanmuOverlayInstance | null,
+  generation: number,
 ) => {
+  const session = getSession(ctx);
+  if (generation !== session.generation) return;
   if (!roomId || ctx.isDanmakuListenerActive.value) {
     return;
   }
@@ -71,10 +74,25 @@ export const startCurrentDanmakuListener = async (
   }
 
   try {
+    let ready = false;
+    const announce = (status: string, message?: string) => {
+      if (generation !== session.generation || (status === 'ready' && ready)) return;
+      ready = status === 'ready';
+      if (!ctx.isFullScreen.value) ctx.danmakuMessages.value.push({
+        id: 'system-' + Date.now(), nickname: '系统消息', isSystem: true,
+        content: status === 'ready' ? '弹幕连接成功！' : (message || '弹幕连接已断开，请刷新重试。'),
+        type: status === 'ready' ? 'success' : 'error',
+      });
+    };
+    session.unlistenStatus = await listen<{room_id: string; platform: string; status: string; message?: string}>(
+      'danmaku-status', ({ payload }) => {
+        if (payload.room_id === roomId && payload.platform.toUpperCase() === platform) announce(payload.status, payload.message);
+      },
+    );
     let lastOverlayEmitAt = 0;
     const renderOptions = {
       shouldDisplay: (message?: DanmakuMessage) => {
-        if (!ctx.isDanmuEnabled.value || isBlockedMessage(message)) {
+        if (generation !== session.generation || !ctx.isDanmuEnabled.value || isBlockedMessage(message)) {
           return false;
         }
         if (message?.isSystem) {
@@ -92,7 +110,11 @@ export const startCurrentDanmakuListener = async (
         lastOverlayEmitAt = now;
         return true;
       },
-      shouldAppendToList: () => !ctx.isDanmuListCollapsed.value && !ctx.isFullScreen.value,
+      shouldAppendToList: () => {
+        if (generation !== session.generation) return false;
+        announce('ready');
+        return !ctx.isFullScreen.value;
+      },
       buildCommentOptions: () => ({
         duration: ctx.danmuSettings.duration,
         mode: ctx.danmuSettings.mode,
@@ -114,17 +136,7 @@ export const startCurrentDanmakuListener = async (
 
     if (stopFn) {
       ctx.unlistenDanmakuFn.value = stopFn;
-      if (!ctx.isDanmuListCollapsed.value && !ctx.isFullScreen.value) {
-        const successMessage: DanmakuMessage = {
-          id: `system-conn-${Date.now()}`,
-          nickname: '系统消息',
-          content: '弹幕连接成功！',
-          isSystem: true,
-          type: 'success',
-          color: '#28a745',
-        };
-        ctx.danmakuMessages.value.push(successMessage);
-      }
+
     } else {
       console.warn(`[Player] Danmaku listener for ${platform}/${roomId} did not return a stop function.`);
       ctx.isDanmakuListenerActive.value = false;
@@ -133,7 +145,7 @@ export const startCurrentDanmakuListener = async (
     console.error(`[Player] Failed to start danmaku listener for ${platform}/${roomId}:`, error);
     ctx.isDanmakuListenerActive.value = false;
 
-    if (!ctx.isDanmuListCollapsed.value && !ctx.isFullScreen.value) {
+    if (!ctx.isFullScreen.value) {
       const errorMessage: DanmakuMessage = {
         id: `system-err-${Date.now()}`,
         nickname: '系统消息',
@@ -147,11 +159,15 @@ export const startCurrentDanmakuListener = async (
   }
 };
 
-export const stopCurrentDanmakuListener = async (
+const stopListener = async (
   ctx: DanmakuManagerContext,
   platform?: StreamingPlatform,
   roomId?: string | null | undefined,
 ) => {
+  getSession(ctx).unlistenStatus?.();
+  getSession(ctx).unlistenStatus = null;
+  platform ??= ctx.props.platform;
+  roomId ??= ctx.props.roomId;
   if (platform) {
     if (platform === StreamingPlatform.DOUYU) {
       await stopDouyuDanmaku(roomId!, ctx.unlistenDanmakuFn.value);
@@ -177,4 +193,41 @@ export const stopCurrentDanmakuListener = async (
   }
 
   ctx.isDanmakuListenerActive.value = false;
+};
+
+interface ListenerSession {
+  generation: number;
+  queue: Promise<void>;
+  unlistenStatus: (() => void) | null;
+}
+const sessions = new WeakMap<DanmakuManagerContext, ListenerSession>();
+const getSession = (context: DanmakuManagerContext): ListenerSession => {
+  let session = sessions.get(context);
+  if (!session) {
+    session = { generation: 0, queue: Promise.resolve(), unlistenStatus: null };
+    sessions.set(context, session);
+  }
+  return session;
+};
+
+/** Serializes starts with pending cleanup; only the current generation may render. */
+export const startCurrentDanmakuListener = (
+  context: DanmakuManagerContext, platform: StreamingPlatform, roomId: string,
+  getOverlay: () => DanmuOverlayInstance | null,
+): Promise<void> => {
+  const session = getSession(context);
+  const generation = session.generation;
+  session.queue = session.queue.then(() => startListener(context, platform, roomId, getOverlay, generation));
+  return session.queue;
+};
+
+/** Invalidates callbacks immediately and queues backend cleanup after any pending start. */
+export const stopCurrentDanmakuListener = (
+  context: DanmakuManagerContext, platform?: StreamingPlatform, roomId?: string | null,
+): Promise<void> => {
+  const session = getSession(context);
+  session.generation += 1;
+  const cleanup = () => stopListener(context, platform, roomId);
+  session.queue = session.queue.then(cleanup, cleanup);
+  return session.queue;
 };

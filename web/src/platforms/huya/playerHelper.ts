@@ -1,3 +1,4 @@
+import type { PlaybackConfig } from '../common/playback';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type Event as TauriEvent } from '@tauri-apps/api/event';
 import { Ref } from 'vue';
@@ -7,41 +8,38 @@ import { v4 as uuidv4 } from 'uuid';
 export interface HuyaUnifiedEntry {
   quality: string;
   bitRate: number;
+  line: string;
   url: string;
 }
 
+interface HuyaPlaybackResponse {
+  is_live: boolean;
+  selected_url: string | null;
+  flv_tx_urls: HuyaUnifiedEntry[];
+  lines: string[];
+  headers: Record<string, string>;
+}
+
+/** Resolves the requested room and options; propagates platform and token errors. */
 export async function getHuyaStreamConfig(
   roomId: string,
   quality: string = '原画',
   line?: string | null,
-): Promise<{ streamUrl: string; streamType: string | undefined }> {
-  console.log('[HuyaPlayerHelper] getHuyaStreamConfig called with roomId:', roomId, 'quality:', quality);
+): Promise<PlaybackConfig> {
   try {
-    const result = await invoke<any>('get_huya_unified_cmd', { roomId, quality, line: line ?? null });
-    console.log('[HuyaPlayerHelper] getHuyaStreamConfig got result:', result);
-
-    if (result && result.flv_tx_urls && Array.isArray(result.flv_tx_urls)) {
-      const streamUrl =
-        pickHuyaUrlByQuality(result.flv_tx_urls, quality) ||
-        result.selected_url ||
-        result.flv_tx_urls[0]?.url;
-
-      if (streamUrl) {
-        const sanitizedUrl = enforceHttps(streamUrl);
-        return { streamUrl: sanitizedUrl, streamType: inferStreamType(sanitizedUrl) };
-      }
-
-      throw new Error('Huya stream URL is unavailable');
-    }
-
-    throw new Error('Failed to fetch Huya room stream details');
-  } catch (error: any) {
-    console.error('[HuyaPlayerHelper] getHuyaStreamConfig error:', error);
-    const msg = String(error?.message || '').trim();
-    if (msg.includes('未开播')) {
-      throw new Error(msg);
-    }
-    throw new Error('Huya stream URL is unavailable');
+    const result = await invoke<HuyaPlaybackResponse>('get_huya_unified_cmd', { roomId, quality, line: line ?? null });
+    if (!result.is_live) throw new Error('虎牙主播未开播');
+    const selected = result.flv_tx_urls.find((entry) => entry.url === result.selected_url);
+    if (!selected) throw new Error('虎牙未返回可用播放地址');
+    return {
+      streamUrl: selected.url, streamType: 'flv', headers: result.headers,
+      qualities: [...new Set(result.flv_tx_urls.map((entry) => entry.quality))],
+      lines: result.lines.map((cdn) => ({ key: cdn, label: cdn })),
+      selectedQuality: selected.quality, selectedLine: selected.line,
+    };
+  } catch (error) {
+    console.error('[Huya] Playback request failed:', error);
+    throw error;
   }
 }
 
@@ -65,14 +63,6 @@ export async function startHuyaDanmakuListener(
     typeof danmuOverlay === 'function' ? danmuOverlay() : danmuOverlay;
   console.log('[HuyaPlayerHelper] Starting Huya danmaku listener for room:', roomId);
   currentHuyaRoomId = roomId;
-
-  try {
-    await invoke('start_huya_danmaku_listener', { payload: { args: { room_id_str: roomId } } });
-    console.log('[HuyaPlayerHelper] Backend Huya danmaku listener started');
-  } catch (error) {
-    console.error('[HuyaPlayerHelper] Failed to start backend Huya danmaku listener:', error);
-    throw error;
-  }
 
   const unlisten = await listen<UnifiedRustDanmakuPayload>('danmaku-message', (event: TauriEvent<UnifiedRustDanmakuPayload>) => {
     console.log('[HuyaPlayerHelper] Received danmaku event:', event.payload);
@@ -123,6 +113,12 @@ export async function startHuyaDanmakuListener(
   });
 
   console.log('[HuyaPlayerHelper] Event listener registered for: danmaku-message');
+  try {
+    await invoke('start_huya_danmaku_listener', { payload: { args: { room_id_str: roomId } } });
+  } catch (error) {
+    unlisten();
+    throw error;
+  }
   return unlisten;
 }
 
@@ -147,48 +143,3 @@ export async function stopHuyaDanmaku(currentUnlistenFn: (() => void) | null): P
   console.log('[HuyaPlayerHelper] Huya danmaku stopped');
 }
 
-function pickHuyaUrlByQuality(entries: HuyaUnifiedEntry[], quality: string): string | undefined {
-  if (matchesHuyaQuality(quality, 'source')) {
-    return entries.find((entry) => entry.bitRate === 0)?.url ?? entries.find((entry) => matchesHuyaQuality(entry.quality, 'source'))?.url;
-  }
-  if (matchesHuyaQuality(quality, 'high')) {
-    return entries.find((entry) => entry.bitRate === 4000)?.url ?? entries.find((entry) => matchesHuyaQuality(entry.quality, 'high'))?.url;
-  }
-  if (matchesHuyaQuality(quality, 'standard')) {
-    return entries.find((entry) => entry.bitRate === 2000)?.url ?? entries.find((entry) => matchesHuyaQuality(entry.quality, 'standard'))?.url;
-  }
-  return entries.find((entry) => entry.quality === quality)?.url;
-}
-
-function matchesHuyaQuality(value: string | undefined, target: 'source' | 'high' | 'standard'): boolean {
-  if (!value) {
-    return false;
-  }
-  const normalized = value.toLowerCase();
-  if (target === 'source') {
-    return normalized.includes('原') || normalized.includes('source') || normalized.includes('blue');
-  }
-  if (target === 'high') {
-    return normalized.includes('高') || normalized.includes('high');
-  }
-  return normalized.includes('标') || normalized.includes('standard') || normalized.includes('流畅');
-}
-
-function enforceHttps(url: string): string {
-  if (!url) return url;
-  if (url.startsWith('http://')) {
-    return url.replace('http://', 'https://');
-  }
-  return url;
-}
-
-function inferStreamType(url: string): string | undefined {
-  if (!url) return undefined;
-  if (url.includes('.flv')) {
-    return 'flv';
-  }
-  if (url.includes('.m3u8')) {
-    return 'hls';
-  }
-  return undefined;
-}

@@ -90,7 +90,7 @@ fn build_cookie_header(cookies: &[(String, String)]) -> String {
         .join("; ")
 }
 
-async fn ensure_buvid(client: &reqwest::Client, cookie_header: &mut String) -> Result<(), String> {
+pub(super) async fn ensure_buvid(client: &reqwest::Client, cookie_header: &mut String) -> Result<(), String> {
     let mut cookies = parse_cookie_pairs(cookie_header);
     let has_buvid3 = find_cookie(&cookies, "buvid3").is_some();
     let has_buvid4 = find_cookie(&cookies, "buvid4").is_some();
@@ -133,6 +133,9 @@ async fn ensure_buvid(client: &reqwest::Client, cookie_header: &mut String) -> R
         }
     }
 
+    if find_cookie(&cookies, "buvid3").is_none() || find_cookie(&cookies, "buvid4").is_none() {
+        return Err("B站未返回有效 buvid，可能受到平台限制".to_string());
+    }
     *cookie_header = build_cookie_header(&cookies);
     Ok(())
 }
@@ -155,7 +158,7 @@ pub async fn search_bilibili_rooms(
         .build()
         .map_err(|e| format!("Failed to build client: {}", e))?;
 
-    let _ = ensure_buvid(&client, &mut cookie_header).await;
+    ensure_buvid(&client, &mut cookie_header).await?;
 
     let mut req = client
         .get(SEARCH_ENDPOINT)
@@ -197,6 +200,9 @@ pub async fn search_bilibili_rooms(
         return Err(format!("Bilibili search failed: {}", msg));
     }
 
+    if !payload.pointer("/data/result").is_some_and(|result| result.is_object()) {
+        return Err("B站搜索响应缺少结果数据".to_string());
+    }
     let mut result = Vec::new();
     if let Some(live_users) = payload
         .get("data")

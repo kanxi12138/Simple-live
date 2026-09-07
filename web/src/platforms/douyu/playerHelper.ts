@@ -1,3 +1,5 @@
+import { emit } from '@tauri-apps/api/event';
+import type { PlaybackConfig } from '../common/playback';
 import { invoke } from '@tauri-apps/api/core';
 import { v4 as uuidv4 } from 'uuid';
 import type { Ref } from 'vue';
@@ -38,8 +40,6 @@ interface DouyuPlayInfo {
 type DouyuSttMessage = Record<string, string>;
 
 const QUALITY_ORIGIN = '原画';
-const QUALITY_HIGH = '高清';
-const QUALITY_STANDARD = '标清';
 const DEFAULT_DOUYU_DID = '10000000000000000000000000001501';
 const DOUYU_DANMAKU_URL = 'wss://danmuproxy.douyu.com:8506';
 const DOUYU_DANMAKU_HEARTBEAT_MS = 45_000;
@@ -56,9 +56,8 @@ export async function getDouyuStreamConfig(
   roomId: string,
   quality: string = QUALITY_ORIGIN,
   line?: string | null,
-): Promise<{ streamUrl: string; streamType: string | undefined }> {
-  await stopDouyuProxy();
-
+): Promise<PlaybackConfig> {
+  let playbackOptions: Partial<PlaybackConfig> = {};
   let finalStreamUrl: string | null = null;
   let streamType: string | undefined;
   const maxAttempts = 2;
@@ -86,8 +85,16 @@ export async function getDouyuStreamConfig(
         signData,
       });
 
+      if (!playInfo.variants.length || !playInfo.cdns.length) throw new Error('斗鱼未返回可用画质或线路');
       const selectedRate = resolveRateForQuality(quality, playInfo?.variants ?? []);
       const selectedCdn = selectDouyuCdn(line, playInfo?.cdns ?? []);
+      playbackOptions = {
+        qualities: playInfo.variants.map((variant) => variant.name),
+        lines: playInfo.cdns.map((cdn) => ({ key: cdn, label: cdn })),
+        selectedQuality: playInfo.variants.find((variant) => variant.rate === selectedRate)?.name,
+        selectedLine: selectedCdn,
+        headers: { Referer: `https://www.douyu.com/${realRoomId}`, 'User-Agent': navigator.userAgent },
+      };
       const streamUrl = await invoke<string>('fetch_douyu_play_url_cmd', {
         roomId: realRoomId,
         signData,
@@ -122,12 +129,9 @@ export async function getDouyuStreamConfig(
     throw new Error('Unable to resolve a valid Douyu stream URL');
   }
 
-  await invoke('set_stream_url_cmd', { url: finalStreamUrl });
-  const proxyUrl = await invoke<string>('start_proxy');
-  douyuProxyActive = true;
-
   return {
-    streamUrl: withLocalProxyCacheBust(proxyUrl),
+    ...playbackOptions,
+    streamUrl: finalStreamUrl,
     streamType: streamType === 'hls' ? 'hls' : 'flv',
   };
 }
@@ -226,6 +230,7 @@ export async function startDouyuDanmakuListener(
         return;
       }
       const chunk = await toUint8Array(event.data);
+      if (connectionToken !== currentDouyuDanmakuConnectionToken) return;
       postAndroidDebugLog('d', `[DouyuDanmaku] recv chunk room=${normalizedRoomId} bytes=${chunk.length}`);
       pendingBuffer = appendUint8Array(pendingBuffer, chunk);
       const parsedBatch = decodeDouyuPacketBatch(pendingBuffer);
@@ -252,7 +257,10 @@ export async function startDouyuDanmakuListener(
       }
     };
 
-    socket.onerror = (error) => {
+    socket.onerror = async (error) => {
+      try {
+        await emit('danmaku-status', { room_id: roomId, platform: 'douyu', status: 'error', message: '斗鱼弹幕连接失败，正在重连' });
+      } catch (emitError) { console.warn('[Douyu] Failed to emit status:', emitError); }
       postAndroidDebugLog('e', `[DouyuDanmaku] socket error room=${normalizedRoomId} ${String(error)}`);
       console.warn('[DouyuPlayerHelper] Douyu danmaku websocket error:', error);
     };
@@ -329,105 +337,19 @@ function executeDouyuSign(script: string, rid: string, did: string, ts: number):
   return result;
 }
 
-function normalizeDouyuCdnKey(input: string | null | undefined): string {
-  const normalized = String(input || '').trim().toLowerCase();
-  if (normalized === 'ws-h5' || normalized === 'tct-h5' || normalized === 'ali-h5' || normalized === 'hs-h5') {
-    return normalized;
-  }
-  return 'ws-h5';
-}
-
 function selectDouyuCdn(requested: string | null | undefined, available: string[]): string {
-  const normalizedRequested = normalizeDouyuCdnKey(requested);
-  if (!available.length) {
-    return normalizedRequested;
-  }
-  return available.find((item) => item.toLowerCase() === normalizedRequested) ?? available[0];
+  return available.find((cdn) => cdn === requested) ?? available[0];
 }
 
 function resolveRateForQuality(quality: string, variants: DouyuRateVariant[]): number {
-  if (!variants.length) {
-    return 0;
-  }
-
-  if (quality === QUALITY_ORIGIN) {
-    return variants.find((variant) => variant.rate === 0)?.rate
-      ?? variants.reduce((best, variant) => Math.min(best, variant.rate), Number.POSITIVE_INFINITY);
-  }
-
-  if (quality === QUALITY_HIGH) {
-    const sortedHigh = [...variants]
-      .filter((variant) => variant.rate !== 0)
-      .sort((left, right) => (right.bit ?? 0) - (left.bit ?? 0) || right.rate - left.rate);
-    return variants.find((variant) => variant.rate === 4)?.rate
-      ?? sortedHigh[0]?.rate
-      ?? 0;
-  }
-
-  if (quality === QUALITY_STANDARD) {
-    const sortedLow = [...variants]
-      .filter((variant) => variant.rate !== 0)
-      .sort(
-        (left, right) =>
-          (left.bit ?? Number.MAX_SAFE_INTEGER) - (right.bit ?? Number.MAX_SAFE_INTEGER)
-          || left.rate - right.rate,
-      );
-    return variants.find((variant) => variant.rate === 3)?.rate
-      ?? sortedLow[0]?.rate
-      ?? 0;
-  }
-
-  return Math.max(...variants.map((variant) => variant.rate));
+  const selected = variants.find((variant) => variant.name === quality) ?? variants[0];
+  if (!selected) throw new Error('斗鱼未返回可用画质');
+  return selected.rate;
 }
 
 function buildDouyuPlayableUrl(streamUrl: string): { url: string; streamType: string } {
-  const decoded = streamUrl ? streamUrl.replace(/&amp;/g, '&') : streamUrl;
-  const inferredType = inferDouyuStreamType(decoded);
-
-  if (decoded && /^https?:\/\//i.test(decoded)) {
-    return {
-      url: decoded,
-      streamType: inferredType,
-    };
-  }
-
-  const key = extractDouyuStreamKey(decoded);
-  if (key) {
-    return {
-      url: `http://vplay1a.douyucdn.cn/live/${key}.flv?uuid=`,
-      streamType: 'flv',
-    };
-  }
-
-  return {
-    url: decoded,
-    streamType: inferredType,
-  };
-}
-
-function withLocalProxyCacheBust(proxyUrl: string): string {
-  const separator = proxyUrl.includes('?') ? '&' : '?';
-  return `${proxyUrl}${separator}t=${Date.now()}`;
-}
-
-function extractDouyuStreamKey(streamUrl: string): string | null {
-  if (!streamUrl) {
-    return null;
-  }
-
-  const patterns = [
-    /\/live\/(\d{1,8}[0-9a-zA-Z]+)(?:_\d{0,4})?(?:\.flv|\.xs|\/playlist|\.m3u8)/i,
-    /(\d{1,8}[0-9a-zA-Z]+)(?:_\d{0,4})?(?:\.flv|\.xs|\/playlist|\.m3u8)/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = streamUrl.match(pattern);
-    if (match?.[1]) {
-      return match[1];
-    }
-  }
-
-  return null;
+  const decoded = streamUrl.replace(/&amp;/g, '&');
+  return { url: decoded, streamType: inferDouyuStreamType(decoded) };
 }
 
 function inferDouyuStreamType(streamUrl: string): string {
@@ -669,6 +591,7 @@ function startNativeDouyuDanmakuListener(
     }
     try {
       const payload = JSON.parse(customEvent.detail) as UnifiedRustDanmakuPayload;
+      if (payload.room_id !== normalizedRoomId) return;
       const frontendDanmaku = buildDouyuFrontendDanmaku(payload, fallbackRoomId);
       pushDouyuDanmakuToUi(frontendDanmaku, resolveOverlay, danmakuMessagesRef, renderOptions);
     } catch (error) {
@@ -676,9 +599,15 @@ function startNativeDouyuDanmakuListener(
     }
   };
 
-  const statusHandler = (event: Event) => {
-    const customEvent = event as CustomEvent<string>;
-    postAndroidDebugLog('w', `[DouyuDanmaku] native status room=${normalizedRoomId} detail=${customEvent.detail || ''}`);
+  const statusHandler = async (event: Event) => {
+    try {
+      const status = JSON.parse((event as CustomEvent<string>).detail) as { type: string; room_id: string; message: string };
+      if (status.room_id !== normalizedRoomId || !['ready', 'error', 'closed'].includes(status.type)) return;
+      await emit('danmaku-status', { room_id: fallbackRoomId, platform: 'douyu',
+        status: status.type === 'ready' ? 'ready' : 'error', message: status.message });
+    } catch (error) {
+      console.warn('[Douyu] Native danmaku status error:', error);
+    }
   };
 
   window.addEventListener('dtv-douyu-danmaku', eventHandler as EventListener);

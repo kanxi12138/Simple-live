@@ -746,3 +746,4 @@ export class LineControl extends Plugin {
     root.style.display = options.length === 0 ? 'none' : '';
   }
 }
+

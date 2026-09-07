@@ -16,6 +16,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 struct BetardRoomInfo {
     room_id: Option<Value>,
     show_status: Option<Value>,
+    #[serde(rename = "videoLoop")]
+    video_loop: Option<Value>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -190,13 +192,19 @@ impl DouYu {
                         .as_ref()
                         .and_then(value_to_i32)
                         .unwrap_or(0);
-                    return Ok((room_id, show_status == 1));
+                    let is_loop = room.video_loop.as_ref().and_then(value_to_i32) == Some(1);
+                    return Ok((room_id, show_status == 1 && !is_loop));
                 }
             }
         }
 
         let room_id = self.resolve_room_id_from_mobile_page().await?;
-        Ok((room_id, true))
+        let json: Value = self.client.get(format!("https://www.douyu.com/swf_api/h5room/{room_id}"))
+            .send().await?.error_for_status()?.json().await?;
+        let data = json.get("data").ok_or("斗鱼房间状态获取失败")?;
+        let status = data.get("show_status").and_then(value_to_i32)
+            .ok_or("斗鱼房间状态缺失")?;
+        Ok((room_id, status == 1 && data.get("videoLoop").and_then(value_to_i32) != Some(1)))
     }
 
     async fn get_h5_enc(&self, room_id: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -284,7 +292,7 @@ impl DouYu {
         cdns_sorted.sort_by(|a, b| {
             let a_is_scdn = a.starts_with("scdn");
             let b_is_scdn = b.starts_with("scdn");
-            (a_is_scdn, a).cmp(&(b_is_scdn, b))
+            a_is_scdn.cmp(&b_is_scdn)
         });
 
         let variants = data
@@ -309,6 +317,9 @@ impl DouYu {
             })
             .unwrap_or_default();
 
+        if variants.is_empty() || cdns_sorted.is_empty() {
+            return Err("斗鱼未返回可用画质或线路".into());
+        }
         Ok(DouyuPlayInfo {
             variants,
             cdns: cdns_sorted,
@@ -391,7 +402,7 @@ impl DouYu {
             .variants
             .iter()
             .map(|variant| variant.rate)
-            .max()
+            .next()
             .unwrap_or(0);
         let selected_cdn = Self::select_cdn(cdn, &play_info.cdns);
         self.get_play_url(&real_room_id, &sign_data, best_rate, &selected_cdn)
@@ -414,7 +425,7 @@ impl DouYu {
         let sign_data = self.build_sign_params(&real_room_id).await?;
         let play_info = self.get_play_qualities(&real_room_id, &sign_data).await?;
         let selected_rate = Self::resolve_rate_for_quality(quality, &play_info.variants)
-            .or_else(|| play_info.variants.iter().map(|v| v.rate).max())
+            .or_else(|| play_info.variants.first().map(|variant| variant.rate))
             .unwrap_or(0);
         println!(
             "[Douyu Stream URL] Requested quality '{}', resolved rate {} (variants: {:?})",
@@ -430,102 +441,8 @@ impl DouYu {
             return None;
         }
 
-        let trimmed = quality.trim();
-        let ascii_lower = trimmed.to_ascii_lowercase();
-        let canonical = if trimmed.contains('原') || ascii_lower == "origin" {
-            "原画"
-        } else if trimmed.contains('高') || ascii_lower == "high" {
-            "高清"
-        } else if trimmed.contains('标') || ascii_lower == "standard" {
-            "标清"
-        } else {
-            trimmed
-        };
-
-        let find_by_keywords = |keywords: &[&str], exclude_zero: bool| -> Option<i32> {
-            for keyword in keywords {
-                if let Some(item) = variants.iter().find(|v| v.name.contains(keyword)) {
-                    if exclude_zero && item.rate == 0 {
-                        continue;
-                    }
-                    return Some(item.rate);
-                }
-            }
-            None
-        };
-
-        match canonical {
-            "原画" => {
-                if let Some(item) = variants.iter().find(|v| v.rate == 0) {
-                    return Some(item.rate);
-                }
-                if let Some(rate) = find_by_keywords(&["原画", "蓝光8M", "蓝光"], false) {
-                    return Some(rate);
-                }
-                variants.iter().map(|v| v.rate).min()
-            }
-            "高清" => {
-                if let Some(item) = variants.iter().find(|v| v.rate == 4) {
-                    return Some(item.rate);
-                }
-                if let Some(rate) = find_by_keywords(&["蓝光", "蓝光4M"], false) {
-                    return Some(rate);
-                }
-                if let Some(rate) = find_by_keywords(&["超清"], true) {
-                    return Some(rate);
-                }
-                if let Some(rate) = find_by_keywords(&["高清"], true) {
-                    return Some(rate);
-                }
-                variants
-                    .iter()
-                    .filter(|v| v.rate != 0)
-                    .max_by_key(|v| v.bit.unwrap_or(0))
-                    .map(|v| v.rate)
-                    .or_else(|| {
-                        variants
-                            .iter()
-                            .filter(|v| v.rate != 0)
-                            .max_by_key(|v| v.rate)
-                            .map(|v| v.rate)
-                    })
-            }
-            "标清" => {
-                if let Some(item) = variants.iter().find(|v| v.rate == 3) {
-                    return Some(item.rate);
-                }
-                if let Some(rate) = find_by_keywords(&["超清"], true) {
-                    return Some(rate);
-                }
-                if let Some(rate) = find_by_keywords(&["流畅"], true) {
-                    return Some(rate);
-                }
-                if let Some(rate) = find_by_keywords(&["标清"], true) {
-                    return Some(rate);
-                }
-                if let Some(rate) = find_by_keywords(&["普清"], true) {
-                    return Some(rate);
-                }
-                variants
-                    .iter()
-                    .filter(|v| v.rate != 0)
-                    .min_by_key(|v| v.bit.unwrap_or(i32::MAX))
-                    .map(|v| v.rate)
-                    .or_else(|| {
-                        variants
-                            .iter()
-                            .filter(|v| v.rate != 0)
-                            .min_by_key(|v| v.rate)
-                            .map(|v| v.rate)
-                    })
-            }
-            _ => {
-                if let Some(rate) = find_by_keywords(&[canonical], false) {
-                    return Some(rate);
-                }
-                None
-            }
-        }
+        variants.iter().find(|variant| variant.name == quality.trim())
+            .or_else(|| variants.first()).map(|variant| variant.rate)
     }
 }
 

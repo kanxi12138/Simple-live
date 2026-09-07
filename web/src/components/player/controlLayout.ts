@@ -1,5 +1,19 @@
 import type Player from 'xgplayer';
 
+/** Groups stream options for the portrait row; accepts the player root and returns nothing. */
+const groupStreamControls = (root: HTMLElement): void => {
+  const rightGrid = root.querySelector('.xg-right-grid');
+  if (!rightGrid || rightGrid.querySelector('.stream-control-group')) return;
+  const controls = Array.from(rightGrid.querySelectorAll<HTMLElement>(
+    '.xgplayer-quality-control, .xgplayer-line-control',
+  ));
+  if (!controls.length) return;
+  const group = document.createElement('div');
+  group.className = 'stream-control-group';
+  rightGrid.insertBefore(group, controls[0]);
+  controls.forEach((control) => group.appendChild(control));
+};
+
 export const arrangeControlClusters = (player: Player | null) => {
   if (!player || !player.root) {
     return;
@@ -9,6 +23,7 @@ export const arrangeControlClusters = (player: Player | null) => {
     try {
       groupPrimaryControls(root);
       groupDanmuControls(root);
+      groupStreamControls(root);
     } catch (error) {
       console.warn('[Player] Failed to arrange player controls:', error);
     }
