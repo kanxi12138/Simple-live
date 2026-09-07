@@ -17,7 +17,7 @@
     >
       <div class="live-grid-common" :style="{ '--items-per-row': itemsPerRow }">
         <div 
-          v-for="room in rooms" 
+          v-for="(room, index) in rooms" 
           :key="room.room_id" 
           class="card-shadow-wrapper"
           :class="{ 'hover-paused': isScrolling }"
@@ -28,7 +28,8 @@
                 <div class="image-wrapper-frame">
                   <SmoothImage 
                     :src="room.room_cover || ''" 
-                    :alt="room.title" 
+                    :alt="room.title"
+                    :loading="index < itemsPerRow * INITIAL_IMAGE_ROWS ? 'eager' : 'lazy'" 
                     class="preview-image-common" 
                   />
                   <div class="card-overlay-gradient"></div>
@@ -42,7 +43,8 @@
                 <div class="avatar-container">
                   <SmoothImage 
                     :src="room.avatar || ''" 
-                    :alt="room.nickname" 
+                    :alt="room.nickname"
+                    :loading="index < itemsPerRow * INITIAL_IMAGE_ROWS ? 'eager' : 'lazy'" 
                     class="streamer-avatar-common" 
                   />
                 </div>
@@ -96,6 +98,7 @@ const props = defineProps<{
   douyuCategory?: DouyuCategorySelection | null;
 }>();
 
+const INITIAL_IMAGE_ROWS = 2;
 const router = useRouter();
 const listRootRef = ref<HTMLElement | null>(null);
 const loadMoreSentinelRef = ref<HTMLElement | null>(null);
@@ -463,7 +466,6 @@ defineExpose({
 .card-shadow-wrapper {
   position: relative;
   transition: transform 0.2s ease;
-  will-change: transform;
 }
 
 .card-shadow-wrapper:hover {

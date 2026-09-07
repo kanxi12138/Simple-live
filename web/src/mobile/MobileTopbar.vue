@@ -87,8 +87,8 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
   z-index: 35;
   padding: max(14px, env(safe-area-inset-top)) 14px 12px;
   background: var(--mobile-topbar-bg);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border-bottom: 1px solid var(--mobile-topbar-border);
   box-shadow: 0 8px 24px rgba(69, 48, 30, 0.06);
 }
@@ -135,7 +135,7 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
 
 .brand-copy span {
   color: var(--mobile-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
@@ -175,13 +175,13 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
 .platform-pill {
   flex: 0 0 auto;
   min-width: 66px;
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 15px;
   border: 1px solid var(--mobile-border);
   border-radius: 999px;
   background: var(--mobile-pill-bg);
   color: var(--mobile-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -201,5 +201,21 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
 .mobile-topbar--dark .brand-mark {
   background: linear-gradient(135deg, #ed8158, #c95f39);
   box-shadow: 0 10px 22px rgba(237, 129, 88, 0.24);
+}
+
+.icon-btn,
+.platform-pill {
+  transition: background-color 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
+}
+
+.icon-btn:focus-visible,
+.platform-pill:focus-visible {
+  outline: 2px solid var(--mobile-pill-active-text);
+  outline-offset: 3px;
+}
+
+.icon-btn:active,
+.platform-pill:active {
+  opacity: 0.72;
 }
 </style>

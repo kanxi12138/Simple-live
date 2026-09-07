@@ -19,7 +19,7 @@
     <div v-else class="entry-list">
       <article v-for="entry in entries" :key="entry.id" class="entry-card">
         <div class="entry-main" @click="playEntry(entry.id)">
-          <img v-if="entry.cover" :src="entry.cover" :alt="entry.title" class="entry-cover" />
+          <img loading="lazy" decoding="async" v-if="entry.cover" :src="entry.cover" :alt="entry.title" class="entry-cover" />
           <div v-else class="entry-cover entry-cover--fallback">{{ entry.title.slice(0, 1) }}</div>
           <div class="entry-meta">
             <strong>{{ entry.title }}</strong>
@@ -109,11 +109,11 @@ const playEntry = (id: string) => {
 
 <style scoped>
 .custom-m3u8-home { display: flex; flex-direction: column; gap: 12px; padding: 10px 12px 16px; }
-.editor-card, .entry-card { border: 1px solid var(--glass-border); border-radius: 16px; background: var(--hover-bg); padding: 12px; }
+.editor-card, .entry-card { border: 1px solid var(--glass-border); border-radius: 16px; background: var(--mobile-surface); padding: 12px; }
 .editor-grid, .entry-list { display: grid; gap: 10px; }
-input, textarea { width: 100%; border: 1px solid var(--mobile-border, var(--glass-border)); border-radius: 12px; background: transparent; color: var(--text-primary); padding: 10px 12px; }
+input, textarea { width: 100%; border: 1px solid var(--mobile-border, var(--glass-border)); border-radius: 12px; background: var(--mobile-surface-muted); color: var(--text-primary); padding: 10px 12px; }
 .editor-actions, .entry-actions { display: flex; gap: 8px; margin-top: 10px; }
-button { min-height: 38px; padding: 0 14px; border: none; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 700; }
+button { min-height: 38px; padding: 0 14px; border: none; border-radius: 12px; background: var(--accent); color: var(--accent-text); font-weight: 700; }
 button.secondary { background: rgba(148, 163, 184, 0.18); color: var(--text-primary); }
 button.danger { background: rgba(239, 68, 68, 0.84); }
 .entry-card { display: grid; gap: 10px; }
