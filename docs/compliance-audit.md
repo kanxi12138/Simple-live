@@ -272,3 +272,7 @@ M	web/src/stores/bilibili.ts
 M	web/src/styles/global.css
 A	web/src/styles/ui-polish.css
 ```
+
+## 远程合并说明
+
+合入远程已有源码发布提交，保留其历史文档隐私清理与版本配置：app/app/.gitignore、app/app/tauri.properties、docs/v5.2.0-porting.md、docs/v5.2.1-frontend.md。冲突仅按已经审查的风险整改保留，未强制覆盖远程。合并没有改变已构建的 Rust、前端及 Android 业务代码；原生版本属性与生成工程的 5.2.1 / 5002001 一致。
