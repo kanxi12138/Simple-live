@@ -81,34 +81,76 @@ fn emit_chat(body: &[u8], app: &tauri::AppHandle, room: &str) -> Result<()> {
     Ok(())
 }
 
+/// Validates chat endpoints separately from the HTTP policy, which excludes WSS 2245.
+fn chat_target(hostname: &str, port: u64) -> Result<reqwest::Url, &'static str> {
+    if hostname.is_empty() || !hostname.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-')) {
+        return Err("域名拒绝");
+    }
+    let hostname = hostname.to_ascii_lowercase();
+    if hostname != "chat.bilibili.com" && !hostname.ends_with(".chat.bilibili.com") {
+        return Err("域名拒绝");
+    }
+    if !matches!(port, 443 | 2245) { return Err("端口拒绝"); }
+    let target = reqwest::Url::parse(&format!("wss://{hostname}:{port}/sub"))
+        .map_err(|_| "地址格式拒绝")?;
+    if target.scheme() != "wss" || target.path() != "/sub"
+        || !target.username().is_empty() || target.password().is_some()
+        || target.query().is_some() || target.fragment().is_some()
+    {
+        return Err("地址格式拒绝");
+    }
+    Ok(target)
+}
+
 async fn run_listener(room: &str, cookie: Option<&str>, app: &tauri::AppHandle) -> Result<()> {
-    let (client, cookie) = super::stream_url::runtime_client(cookie).await?;
-    let room_info = super::stream_url::room_info(&client, room).await?;
-    let real_room = room_info["room_info"]["room_id"].as_u64().context("B站未返回真实房间号")?;
-    let query = super::stream_url::signed_query(&client, vec![("id", real_room.to_string()), ("type", "0".to_string())]).await?;
+    let (client, cookie) = super::stream_url::runtime_client(cookie).await.context("B站弹幕 Cookie/buvid 初始化失败")?;
+    let detail = super::stream_url::room_init(&client, room).await.context("B站弹幕房间解析失败")?;
+    let real_room = detail["room_id"].as_u64().context("B站 room_init 未返回弹幕真实房间号")?;
+    // DTV includes web_location in the signed getDanmuInfo parameters.
+    let query = super::stream_url::signed_query(&client, vec![
+        ("id", real_room.to_string()), ("type", "0".to_string()),
+        ("web_location", "444.8".to_string()),
+    ]).await.context("B站弹幕 WBI 签名失败")?;
     let response: Value = client.get(format!("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?{query}"))
-        .send_limited().await?.error_for_status()?.json().await?;
-    if response["code"].as_i64() != Some(0) { bail!("B站弹幕服务器请求失败: {}", response["message"]); }
-    let token = response["data"]["token"].as_str().filter(|token| !token.is_empty()).context("B站未返回弹幕 Token")?;
-    let hosts = response["data"]["host_list"].as_array().context("B站未返回弹幕服务器")?;
+        .send_limited().await.context("B站 getDanmuInfo 网络请求失败")?
+        .error_for_status().context("B站 getDanmuInfo HTTP 请求失败")?
+        .json().await.context("B站 getDanmuInfo JSON 无效")?;
+    if response["code"].as_i64() != Some(0) {
+        bail!("B站 getDanmuInfo 请求失败（code={}）: {}", response["code"],
+            response["message"].as_str().or_else(|| response["msg"].as_str()).unwrap_or("平台限制或响应异常"));
+    }
+    let token = response["data"]["token"].as_str().filter(|token| !token.is_empty()).context("B站 getDanmuInfo 未返回弹幕 Token")?;
+    let hosts = response["data"]["host_list"].as_array().context("B站 getDanmuInfo 未返回弹幕服务器")?;
     let mut connection = None;
+    let mut failures = Vec::new();
     for host in hosts.iter().take(3) {
-        let hostname = host["host"].as_str().context("B站弹幕主机无效")?;
-        let port = host["wss_port"].as_u64().context("B站弹幕端口缺失")?;
-        let target = reqwest::Url::parse(&format!("https://{hostname}:{port}/sub"))?;
-        if !crate::network_policy::has_domain(&target, &["bilibili.com"]) {
-            bail!("B站弹幕目标不在允许域名内");
-        }
-        match connect_async(format!("wss://{hostname}:{port}/sub")).await {
+        let hostname = host["host"].as_str().unwrap_or_default();
+        let port = host["wss_port"].as_u64().unwrap_or_default();
+        let target = match chat_target(hostname, port) {
+            Ok(target) => target,
+            Err(reason) => {
+                // Do not log malformed raw host fields, which may contain URL credentials.
+                log::warn!("B站弹幕候选地址校验失败: port={port}, reason={reason}");
+                failures.push(reason);
+                continue;
+            }
+        };
+        match connect_async(target.as_str()).await {
             Ok((socket, _)) => { connection = Some(socket); break; }
-            Err(_) => log::warn!("Diagnostic: danmaku.rs:99 (details omitted)"),
+            Err(_) => {
+                log::warn!("B站弹幕连接失败: host={}, port={port}", target.host_str().unwrap_or_default());
+                failures.push("连接失败");
+            }
         }
     }
-    let mut socket = connection.context("B站弹幕服务器均连接失败")?;
+    let mut socket = connection.with_context(|| {
+        let reason = if failures.is_empty() { "无候选服务器".to_string() } else { failures.join("、") };
+        format!("B站弹幕 WebSocket 服务器均不可用: {reason}")
+    })?;
     let auth = json!({"uid": cookie_value(&cookie, "DedeUserID").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0),
         "roomid": real_room, "protover": 3, "platform": "web", "type": 2,
         "buvid": cookie_value(&cookie, "buvid3").context("B站缺少 buvid3")?, "key": token});
-    socket.send(Message::Binary(packet(AUTH, &serde_json::to_vec(&auth)?))).await?;
+    socket.send(Message::Binary(packet(AUTH, &serde_json::to_vec(&auth)?))).await.context("B站弹幕认证包发送失败")?;
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
     loop {
         tokio::select! {
@@ -141,7 +183,7 @@ pub async fn start_bilibili_danmaku_listener(
                 if let Err(error) = result {
                     log::error!("Diagnostic: danmaku.rs:137 (details omitted)");
                     if let Err(_emit_error) = app_handle.emit("danmaku-status", json!({"room_id": room,
-                        "platform": "bilibili", "status": "error", "message": error.to_string()})) {
+                        "platform": "bilibili", "status": "error", "message": format!("{error:#}")})) {
                         log::error!("Diagnostic: danmaku.rs:140 (details omitted)");
                     }
                 }

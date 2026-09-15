@@ -20,9 +20,8 @@ import dependencies from '../../../../docs/licenses/DEPENDENCIES.txt?raw';
 const documents = [
   { title: '隐私说明', text: privacy },
   { title: '功能边界', text: compliance },
-  { title: '第三方版权说明', text: notices },
+  { title: '第三方版权说明', text: `${notices}\n\n${mit}` },
   { title: 'GNU GPL version 3', text: license },
-  { title: '原 DTV MIT 声明', text: mit },
   { title: '依赖许可证', text: dependencies },
 ];
 </script>

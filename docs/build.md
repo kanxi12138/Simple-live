@@ -40,6 +40,6 @@ Push-Location web/src-tauri/gen/android
 Pop-Location
 ```
 
-输出位于 `web/src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk`。使用 aapt 和 apksigner 核对包名 `www.sp.com`、版本 `5.2.1/5002001`、仅 arm64-v8a 及原 release 证书。安装时使用 `adb install -r`，签名不一致则停止，不卸载或清数据。
+输出位于 `web/src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk`。使用 aapt 和 apksigner 核对包名 `www.sp.com`、版本 `5.2.2/5002002`、仅 arm64-v8a 及原 release 证书。安装时使用 `adb install -r`，签名不一致则停止，不卸载或清数据。
 
 APK、JNI、构建目录和本地配置不属于源码提交。本次源码整理不重新打包，不运行功能测试、Lint、格式化或性能测试。

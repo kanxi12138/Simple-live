@@ -22,7 +22,11 @@ export async function getBilibiliStreamConfig(
     );
     if (result.error_message) throw new Error(result.error_message);
     if (result.status !== 1) throw new Error('B站主播未开播');
-    return { ...selectPlaybackVariant(result.available_streams || [], quality, line, result.qualities), headers: result.headers };
+    const variants = result.available_streams || [];
+    // Use the backend's probed default; an explicit line selection still takes precedence.
+    const selectedQuality = line ? quality
+      : variants.find((variant) => variant.url === result.stream_url)?.desc || quality;
+    return { ...selectPlaybackVariant(variants, selectedQuality, line, result.qualities), headers: result.headers };
   } catch (error) {
     console.error('Diagnostic: playerHelper.ts:27 (details omitted)');
     throw error;
