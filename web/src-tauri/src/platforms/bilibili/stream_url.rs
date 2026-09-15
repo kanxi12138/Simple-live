@@ -12,6 +12,7 @@ use crate::platforms::common::{GetStreamUrlPayload, LiveStreamInfo};
 use crate::platforms::common::types::StreamVariant;
 
 const PLAY_ENDPOINT: &str = "https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo";
+const PLAY_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 pub(super) const BILIBILI_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36 Edg/115.0.1901.188";
 
 /// Existing stream response extended with platform-provided quality names and headers.
@@ -40,7 +41,8 @@ pub(super) async fn signed_query(client: &reqwest::Client, parameters: Vec<(&str
     let navigation: Value = client.get("https://api.bilibili.com/x/web-interface/nav")
         .send_limited().await?.error_for_status()?.json().await?;
     let key = |name: &str| -> Result<String> {
-        let link = navigation["data"]["wbi_img"][name].as_str().context("B站未返回 WBI 密钥")?;
+        let link = navigation["data"]["wbi_img"][name].as_str()
+            .with_context(|| format!("B站 nav 未返回 WBI 密钥（code={}）", navigation["code"]))?;
         let filename = link.rsplit('/').next().and_then(|part| part.split('.').next())
             .context("B站 WBI 密钥格式错误")?;
         if filename.len() != 32 || !filename.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -51,35 +53,36 @@ pub(super) async fn signed_query(client: &reqwest::Client, parameters: Vec<(&str
     Ok(super::auth::encode_wbi(parameters, (key("img_url")?, key("sub_url")?)))
 }
 
-/// Resolves a short room ID and metadata using the signed room information endpoint.
-pub(super) async fn room_info(client: &reqwest::Client, room_id: &str) -> Result<Value> {
+/// Resolves short room IDs and live status without requesting signed room metadata.
+pub(super) async fn room_init(client: &reqwest::Client, room_id: &str) -> Result<Value> {
+    let room_id = room_id.trim();
     if room_id.is_empty() || !room_id.bytes().all(|byte| byte.is_ascii_digit()) {
         bail!("B站房间号必须是数字");
     }
-    let query = signed_query(client, vec![("room_id", room_id.to_string())]).await?;
-    let response: Value = client.get(format!("https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?{query}"))
-        .send_limited().await?.error_for_status()?.json().await?;
-    response_data(response)
+    let response = client.get("https://api.live.bilibili.com/room/v1/Room/room_init")
+        .query(&[("id", room_id)]).send_limited().await.context("B站 room_init 网络请求失败")?
+        .error_for_status().context("B站 room_init HTTP 请求失败")?.json().await.context("B站 room_init JSON 无效")?;
+    response_data(response, "room_init")
 }
 
-fn response_data(response: Value) -> Result<Value> {
+fn response_data(response: Value, stage: &str) -> Result<Value> {
     if response["code"].as_i64() != Some(0) {
-        bail!("B站请求失败: {}", response["message"].as_str().unwrap_or("平台限制或响应异常"));
+        bail!("B站 {stage} 请求失败（code={}）: {}", response["code"], response["message"].as_str().or_else(|| response["msg"].as_str()).unwrap_or("平台限制或响应异常"));
     }
-    response.get("data").cloned().context("B站响应缺少数据")
+    response.get("data").filter(|data| !data.is_null()).cloned().with_context(|| format!("B站 {stage} 响应缺少数据"))
 }
 
 async fn play_info(client: &reqwest::Client, room_id: &str, quality: Option<i32>) -> Result<Value> {
     let mut parameters = vec![
         ("room_id", room_id.to_string()), ("protocol", "0,1".to_string()),
-        ("format", if quality.is_some() { "0,2" } else { "0,1,2" }.to_string()),
-        ("codec", if quality.is_some() { "0" } else { "0,1" }.to_string()),
-        ("platform", "web".to_string()),
+        ("format", "0,1,2".to_string()),
+        ("codec", "0".to_string()),
+        ("platform", "html5".to_string()), ("dolby", "5".to_string()),
     ];
     if let Some(quality) = quality { parameters.push(("qn", quality.to_string())); }
-    let response = client.get(PLAY_ENDPOINT).query(&parameters).send_limited().await?
-        .error_for_status()?.json().await?;
-    response_data(response)?.pointer("/playurl_info/playurl").cloned().context("B站未返回播放信息")
+    let response = client.get(PLAY_ENDPOINT).query(&parameters).send_limited().await.context("B站 getRoomPlayInfo 网络请求失败")?
+        .error_for_status().context("B站 getRoomPlayInfo HTTP 请求失败")?.json().await.context("B站 getRoomPlayInfo JSON 无效")?;
+    response_data(response, "getRoomPlayInfo")?.pointer("/playurl_info/playurl").cloned().context("B站 getRoomPlayInfo 未返回播放信息")
 }
 
 fn collect_variants(play: &Value, descriptions: &BTreeMap<i32, String>) -> Result<Vec<StreamVariant>> {
@@ -103,28 +106,61 @@ fn collect_variants(play: &Value, descriptions: &BTreeMap<i32, String>) -> Resul
             }
         }
     }
-    variants.sort_by_key(|variant| variant.url.contains("mcdn"));
-    if variants.is_empty() { bail!("B站未返回可用播放线路"); }
     Ok(variants)
 }
 
+// Adapted from chen-zeong/DTV stream_url.rs (MIT); see THIRD_PARTY_NOTICES.md.
+async fn probe_hls(client: &reqwest::Client, variants: &[StreamVariant], preferred: bool) -> Option<usize> {
+    for (index, variant) in variants.iter().enumerate().filter(|(_, variant)| {
+        (variant.protocol.as_deref().is_some_and(|protocol| protocol.contains("hls"))
+            || matches!(variant.format.as_deref(), Some("ts" | "fmp4" | "mp4" | "m4s" | "m3u8")))
+            && variant.url.contains("d1--cn") == preferred
+    }).take(4) {
+        let Ok(url) = reqwest::Url::parse(&variant.url) else { continue; };
+        if crate::network_policy::stream_platform(&url) != Some("bilibili") { continue; }
+        // A failed CDN probe is recoverable: try the next returned line.
+        if let Ok(response) = client.get(url).header(REFERER, "https://live.bilibili.com/")
+            .header(reqwest::header::ORIGIN, "https://live.bilibili.com").send_limited().await {
+            if response.status().is_success() { return Some(index); }
+        }
+    }
+    None
+}
+
 async fn resolve_stream(payload: GetStreamUrlPayload, quality: String, cookie: Option<String>) -> Result<BilibiliPlaybackResponse> {
-    let (client, _) = runtime_client(cookie.as_deref()).await?;
-    let detail = room_info(&client, payload.args.room_id_str.trim()).await?;
-    let real_id = detail["room_info"]["room_id"].as_u64().context("B站真实房间号缺失")?.to_string();
-    let status = detail["room_info"]["live_status"].as_i64().context("B站直播状态缺失")? as i32;
+    let room_id = payload.args.room_id_str.trim();
+    if room_id.is_empty() || !room_id.bytes().all(|byte| byte.is_ascii_digit()) {
+        bail!("B站房间号必须是数字");
+    }
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::from_static(PLAY_USER_AGENT));
+    headers.insert(REFERER, HeaderValue::from_static("https://live.bilibili.com/"));
+    headers.insert(reqwest::header::ORIGIN, HeaderValue::from_static("https://live.bilibili.com"));
+    if let Some(cookie) = cookie.as_deref().map(str::trim).filter(|cookie| !cookie.is_empty()) {
+        headers.insert(COOKIE, HeaderValue::from_str(cookie).context("B站播放 Cookie 格式无效")?);
+    }
+    let client = reqwest::Client::builder().redirect(crate::network_policy::redirects()).no_proxy()
+        .default_headers(headers).http1_only().connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(15)).build()?;
+    // CDN probes must not receive the API client's login Cookie.
+    let probe_client = reqwest::Client::builder().redirect(crate::network_policy::redirects()).no_proxy()
+        .user_agent(PLAY_USER_AGENT).http1_only().timeout(std::time::Duration::from_secs(15)).build()?;
+    let detail = room_init(&client, room_id).await?;
+    let real_id = detail["room_id"].as_u64().context("B站 room_init 真实房间号缺失")?.to_string();
+    let status = detail["live_status"].as_i64().context("B站 room_init 直播状态缺失")? as i32;
     let mut response = BilibiliPlaybackResponse {
         info: LiveStreamInfo {
-            title: detail["room_info"]["title"].as_str().map(str::to_string),
-            anchor_name: detail["anchor_info"]["base_info"]["uname"].as_str().map(str::to_string),
-            avatar: detail["anchor_info"]["base_info"]["face"].as_str().map(str::to_string),
+            title: detail["title"].as_str().map(str::to_string),
+            anchor_name: detail["uname"].as_str().map(str::to_string),
+            avatar: None,
             stream_url: None, status: Some(status), error_message: None, upstream_url: None,
             available_streams: None, normalized_room_id: Some(real_id.clone()), web_rid: None,
         },
         qualities: Vec::new(),
         headers: BTreeMap::from([
             ("Referer".to_string(), "https://live.bilibili.com".to_string()),
-            ("User-Agent".to_string(), BILIBILI_USER_AGENT.to_string()),
+            ("User-Agent".to_string(), PLAY_USER_AGENT.to_string()),
+            ("Origin".to_string(), "https://live.bilibili.com".to_string()),
         ]),
     };
     if status != 1 { return Ok(response); }
@@ -136,9 +172,33 @@ async fn resolve_stream(payload: GetStreamUrlPayload, quality: String, cookie: O
         .iter().filter_map(|value| value.as_i64().map(|quality| quality as i32)).collect();
     response.qualities = accepted.iter().filter_map(|quality| descriptions.get(quality).cloned()).collect();
     let selected = accepted.iter().find(|candidate| descriptions.get(candidate) == Some(&quality))
-        .or_else(|| accepted.first()).context("B站没有可用画质")?;
-    let selected_play = play_info(&client, &real_id, Some(*selected)).await?;
-    let variants = collect_variants(&selected_play, &descriptions)?;
+        .or_else(|| accepted.iter().max()).context("B站没有可用画质")?;
+    let mut chosen = None;
+    let mut fallback = None;
+    for _ in 0..=3 {
+        let selected_play = play_info(&client, &real_id, Some(*selected)).await?;
+        let mut variants = collect_variants(&selected_play, &descriptions)?;
+        let selected_index = variants.iter().position(|variant| variant.format.as_deref() == Some("flv"));
+        let selected_index = match selected_index {
+            Some(index) => Some(index),
+            None => probe_hls(&probe_client, &variants, true).await,
+        };
+        if let Some(index) = selected_index {
+            // The frontend defaults to the first variant; preserve the chosen line.
+            let selected_variant = variants.remove(index);
+            variants.insert(0, selected_variant);
+            chosen = Some(variants);
+            break;
+        }
+        if fallback.is_none() {
+            if let Some(index) = probe_hls(&probe_client, &variants, false).await {
+                let selected_variant = variants.remove(index);
+                variants.insert(0, selected_variant);
+                fallback = Some(variants);
+            }
+        }
+    }
+    let variants = chosen.or(fallback).context("B站 getRoomPlayInfo 未找到可用的 FLV/HLS 直播线路")?;
     response.info.stream_url = variants.first().map(|variant| variant.url.clone());
     response.info.upstream_url = response.info.stream_url.clone();
     response.info.available_streams = Some(variants);
@@ -153,5 +213,5 @@ pub async fn get_bilibili_live_stream_url_with_quality(
     quality: String,
     cookie: Option<String>,
 ) -> Result<BilibiliPlaybackResponse, String> {
-    resolve_stream(payload, quality, cookie).await.map_err(|error| error.to_string())
+    resolve_stream(payload, quality, cookie).await.map_err(|error| format!("{error:#}"))
 }

@@ -541,7 +541,7 @@ const handleCheckUpdate = async () => {
     const result = await fetchLatestReleaseInfo();
     appVersion.value = result.currentVersion || appVersion.value;
     if (!result.hasUpdate) {
-      updateMessage.value = '当前已经是最新版本 ' + (result.currentVersion || appVersion.value || '5.2.0') + '。';
+      updateMessage.value = '当前已经是最新版本 ' + (result.currentVersion || appVersion.value || '5.2.2') + '。';
       return;
     }
     if (!result.apkAsset) {

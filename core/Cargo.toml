@@ -1,6 +1,6 @@
 [package]
 name = "dtv"
-version = "5.2.1"
+version = "5.2.2"
 description = "Non-commercial learning client for public live streams"
 license = "GPL-3.0-only"
 authors = ["c-zeong"]

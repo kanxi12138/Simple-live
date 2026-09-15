@@ -16,7 +16,15 @@ The Douyu, Huya, Douyin and Bilibili protocol implementations in core/src/platfo
 
 Changes on 2026-09-14: removed official desktop SDK identity and WUP token fetching in Huya; sign only page-supplied AntiCode; removed unconditional Douyin page fallback; isolated Douyu signing from the privileged WebView; restricted network targets, local playback sessions, retries and diagnostics. These adaptations are modified works, not official platform clients.
 
+## DTV Bilibili playback adaptation
+
+Source: https://github.com/chen-zeong/DTV/blob/d2221304f48b62792769e00355c79dc0612303c3/src-tauri/src/platforms/bilibili/stream_url.rs
+
+Copyright (c) 2025 c.zeong. MIT license; full notice retained in docs/licenses/DTV-MIT.txt. Modified on 2026-09-15 for Simple-live 5.2.2: use room_init before playback, adapt HTML5 requests and FLV/HLS selection to the existing response and player, preserve request limits and network restrictions, isolate CDN probes from login cookies, and report API stages and error codes. Existing dart_simple_live-derived helpers remain under their original GPL-3.0 terms.
+
 ## Other dependencies
+
+Bilibili danmaku initialization also references DTV's auth.rs: https://github.com/chen-zeong/DTV/blob/d2221304f48b62792769e00355c79dc0612303c3/src-tauri/src/platforms/bilibili/auth.rs. Modified on 2026-09-15 to resolve rooms with room_init and include web_location in getDanmuInfo signing, retaining the existing asynchronous listener and packet decoding.
 
 Installed npm production dependencies and Cargo metadata are inventoried, with available license texts, in docs/licenses/DEPENDENCIES.txt. Entries include build and possibly other-target dependencies. Declared SPDX expressions are preserved; missing license texts and native/bundled notices require the additional review described in docs/compliance-audit.md. Embedded CryptoJS and QuickJS/V8 retain their upstream terms; no ownership over third-party code is claimed.
 
