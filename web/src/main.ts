@@ -4,7 +4,7 @@ import App from './App.vue';
 import router from './router';
 import { useFollowStore } from './store/followStore'; 
 import { useThemeStore } from './stores/theme';
-import './runtime/androidDiagnostics';
+
 
 const app = createApp(App);
 const pinia = createPinia();
@@ -16,7 +16,7 @@ const followStore = useFollowStore();
 try {
   followStore.loadFollowedStreamers();
 } catch (error) {
-  console.error('[main.ts] Error initializing follow store:', error);
+  console.error('Diagnostic: main.ts:19 (details omitted)');
 }
 
 
@@ -24,7 +24,7 @@ const themeStore = useThemeStore();
 try {
   themeStore.initTheme(); 
 } catch (error) {
-  console.error('[main.ts] Error initializing theme store:', error);
+  console.error('Diagnostic: main.ts:27 (details omitted)');
 }
 
 app.mount('#app');

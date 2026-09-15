@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'; // Added import for invoke
+import { invoke } from '../../services/platformInvoke'; // Added import for invoke
 import * as douyuApi from '../douyu/api';
 import * as douyuParsers from '../douyu/parsers'; // Import Douyu parsers
 import { Platform } from './types'; // Import Platform enum
@@ -21,7 +21,7 @@ export async function fetchRoomInfo(roomId: string): Promise<StreamerDetails> {
       const douyuData = await douyuApi.fetchDouyuRoomInfo(roomId);
       return douyuParsers.parseDouyuRoomDataToStreamerDetails(roomId, douyuData);
     default:
-      console.error(`Platform ${currentPlatform} not supported for fetchRoomInfo`);
+      console.error('Diagnostic: apiService.ts:24 (details omitted)');
       return Promise.reject(`Platform ${currentPlatform} not supported`);
   }
 }
@@ -31,7 +31,7 @@ export async function startDanmakuListener(roomId: string): Promise<void> {
     case 'douyu':
       return douyuApi.startDouyuDanmakuListener(roomId);
     default:
-      console.error(`Platform ${currentPlatform} not supported for startDanmakuListener`);
+      console.error('Diagnostic: apiService.ts:34 (details omitted)');
       return Promise.reject(`Platform ${currentPlatform} not supported`);
   }
 }
@@ -43,14 +43,14 @@ export async function fetchCategories(): Promise<CommonCategoryGroup[]> {
       const groups = await invoke<CommonCategoryGroup[]>('fetch_categories');
       return groups;
     default:
-      console.error(`Platform ${currentPlatform} not supported for fetchCategories`);
+      console.error('Diagnostic: apiService.ts:46 (details omitted)');
       return Promise.reject(`Platform ${currentPlatform} not supported`);
   }
 }
 
 export async function fetchSubCategories(parentId: string): Promise<CommonPlatformCategory[]> {
   if (!parentId) {
-    console.warn('[apiService] fetchSubCategories called with no parentId');
+    console.warn('Diagnostic: apiService.ts:53 (details omitted)');
     return Promise.resolve([]);
   }
   switch (currentPlatform) {
@@ -58,7 +58,7 @@ export async function fetchSubCategories(parentId: string): Promise<CommonPlatfo
       const subCategories = await invoke<CommonPlatformCategory[]>('fetch_three_cate', { tagId: parentId });
       return subCategories;
     default:
-      console.error(`Platform ${currentPlatform} not supported for fetchSubCategories`);
+      console.error('Diagnostic: apiService.ts:61 (details omitted)');
       return Promise.reject(`Platform ${currentPlatform} not supported`);
   }
 }
@@ -73,7 +73,7 @@ export async function fetchStreamPlaybackDetails(roomId: string, platform?: Plat
     case Platform.DOUYIN:
       return Promise.reject('Douyin stream details should be provided directly, not fetched via this common service.');
     default:
-      console.error(`Platform ${targetPlatform} not supported for fetchStreamPlaybackDetails`);
+      console.error('Diagnostic: apiService.ts:76 (details omitted)');
       return Promise.reject(`Platform ${targetPlatform} not supported`);
   }
 }

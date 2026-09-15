@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../services/platformInvoke';
 import type { FollowedStreamer, LiveStreamInfo, LiveStatus } from '../common/types';
 
 export async function refreshDouyinFollowedStreamer(
@@ -18,7 +18,7 @@ export async function refreshDouyinFollowedStreamer(
       const nextId = data.web_rid || streamer.id;
 
       if (data.web_rid && data.web_rid !== streamer.id) {
-        console.info(`[DouyinFollowHelper] Migrating stored ID ${streamer.id} -> ${data.web_rid}`);
+        console.info('Diagnostic: followListHelper.ts:21 (details omitted)');
       }
 
       return {
@@ -31,22 +31,14 @@ export async function refreshDouyinFollowedStreamer(
       };
     } else {
       if (data && data.error_message) {
-        console.warn(
-          `[DouyinFollowHelper] Error fetching Douyin room ${streamer.id}: ${data.error_message}`
-        );
+        console.warn('Diagnostic: followListHelper.ts:34 (details omitted)');
       } else {
-        console.warn(
-          `[DouyinFollowHelper] Received no/invalid data for Douyin room ${streamer.id}`,
-          data
-        );
+        console.warn('Diagnostic: followListHelper.ts:38 (details omitted)');
       }
       return { isLive: false, liveStatus: 'OFFLINE' }; // Ensure these are set on error too
     }
   } catch (e) {
-    console.error(
-      `[DouyinFollowHelper] Failed to refresh Douyin streamer ${streamer.id}:`,
-      e
-    );
+    console.error('Diagnostic: followListHelper.ts:46 (details omitted)');
     return { isLive: false, liveStatus: 'OFFLINE' }; // Ensure these are set on error too
   }
 } 

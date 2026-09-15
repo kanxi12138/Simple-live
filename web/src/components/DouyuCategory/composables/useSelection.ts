@@ -37,7 +37,7 @@ export function useSelection(emit: (event: 'category-selected', ...args: any[]) 
 
   const handleCate3Click = (cate3: Category3) => {
     if (!selectedCate2.value) {
-      console.error('未选择二级分类，无法选择三级分类')
+      console.error('Diagnostic: useSelection.ts:40 (details omitted)')
       return
     }
     

@@ -1,3 +1,4 @@
+use crate::platforms::common::request_limit::LimitedRequest;
 use md5::{Digest, Md5};
 
 // 引入 generate_bilibili_w_webid 以便在缺失时后端自动初始化
@@ -13,26 +14,7 @@ pub async fn fetch_bilibili_live_list(
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // 每次请求前都刷新一次 w_webid，避免使用过期的 ID
-    let w_webid = match generate_bilibili_w_webid(state.clone()).await {
-        Ok(id) => {
-            println!("[Bilibili] Refreshed w_webid: {}", id);
-            id
-        }
-        Err(e) => {
-            eprintln!("[Bilibili] Failed to refresh w_webid, will fallback to cached value if available: {}", e);
-            let fallback = { state.w_webid.lock().unwrap().clone() };
-            match fallback {
-                Some(id) => {
-                    println!(
-                        "[Bilibili] Using cached w_webid due to refresh failure: {}",
-                        id
-                    );
-                    id
-                }
-                None => return Err(format!("w_webid 获取失败: {}", e)),
-            }
-        }
-    };
+    let w_webid = generate_bilibili_w_webid(state.clone()).await?;
 
     let wts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -69,21 +51,12 @@ pub async fn fetch_bilibili_live_list(
 
     let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
     let url = "https://api.live.bilibili.com/xlive/web-interface/v1/second/getList";
-    let query_str = params
-        .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
-        .collect::<Vec<_>>()
-        .join("&");
-    let full_url = format!("{}?{}", url, query_str);
 
-    println!("[Bilibili] Fetch live list: w_webid={}, area_id={}, parent_area_id={}, page={}, wts={}, w_rid={}", w_webid, area_id, parent_area_id, page, wts, &params.iter().find(|(k,_)| k=="w_rid").map(|(_,v)| v.clone()).unwrap_or_default());
-    println!("[Bilibili] GET {}", full_url);
-    println!(
-        "[Bilibili] Headers: User-Agent={}, Referer={}, Cookie={}",
-        ua, "https://www.bilibili.com/", "buvid3=i;"
-    );
+    println!("Diagnostic: live_list.rs:79 (details omitted)");
+    println!("Diagnostic: live_list.rs:80 (details omitted)");
+    println!("Diagnostic: live_list.rs:81 (details omitted)");
 
-    let client = reqwest::Client::builder()
+    let client = reqwest::Client::builder().redirect(crate::network_policy::redirects())
         .user_agent(ua)
         .no_proxy()
         .build()
@@ -94,7 +67,7 @@ pub async fn fetch_bilibili_live_list(
         .header("Referer", "https://www.bilibili.com/")
         .header("Cookie", "buvid3=i;")
         .query(&params)
-        .send()
+        .send_limited()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
 

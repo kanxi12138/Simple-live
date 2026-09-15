@@ -33,10 +33,7 @@ pub fn parse_chat_message(
                 }))
             } else {
                 // 对于没有用户信息的聊天消息 (例如系统消息)，也可能需要发送，但等级为0
-                println!(
-                    "    【聊天msg】Content: {} (no user info)",
-                    chat_msg.content
-                );
+                println!("Diagnostic: message_parsers.rs:36 (details omitted)");
                 Ok(Some(DanmakuFrontendPayload {
                     room_id: current_room_id.to_string(), // Populate room_id
                     user: "系统".to_string(),             // Or some other placeholder
@@ -47,7 +44,7 @@ pub fn parse_chat_message(
             }
         }
         Err(e) => {
-            // eprintln!("    【X】Failed to parse ChatMessage in parser: {}", e); // Commented out to suppress error logging as per user request
+            // eprintln!("Diagnostic: message_parsers.rs:50 (details omitted)"); // Commented out to suppress error logging as per user request
             Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
     }
@@ -62,27 +59,17 @@ pub fn parse_member_message(
 ) -> Result<Option<DanmakuFrontendPayload>, Box<dyn std::error::Error + Send + Sync>> {
     match MemberMessage::decode(payload) {
         Ok(member_msg) => {
-            if let Some(user) = member_msg.user {
-                let user_level = user.pay_grade.as_ref().map(|pg| pg.level).unwrap_or(0);
-                let fans_club_level = user
-                    .fans_club
-                    .as_ref()
-                    .and_then(|fc| fc.data.as_ref())
-                    .map(|fcd| fcd.level)
-                    .unwrap_or(0);
+            if member_msg.user.is_some() {
 
-                println!(
-                    "    【进场msg】[用户等级: {}][粉丝牌等级: {}]{} 进入了直播间",
-                    user_level, fans_club_level, user.nick_name
-                );
+                println!("Diagnostic: message_parsers.rs:74 (details omitted)");
                 Ok(None) // 当前不发送到前端
             } else {
-                println!("    【进场msg】MemberMessage without user details.");
+                println!("Diagnostic: message_parsers.rs:80 (details omitted)");
                 Ok(None)
             }
         }
         Err(e) => {
-            eprintln!("    【X】Failed to parse MemberMessage in parser: {}", e);
+            eprintln!("Diagnostic: message_parsers.rs:85 (details omitted)");
             Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
     }
@@ -97,18 +84,15 @@ pub fn parse_like_message(
 ) -> Result<Option<DanmakuFrontendPayload>, Box<dyn std::error::Error + Send + Sync>> {
     match LikeMessage::decode(payload) {
         Ok(like_msg) => {
-            if let Some(user) = like_msg.user {
-                println!(
-                    "    【点赞msg】{} 点了{}个赞",
-                    user.nick_name, like_msg.count
-                );
+            if like_msg.user.is_some() {
+                println!("Diagnostic: message_parsers.rs:101 (details omitted)");
             } else {
-                println!("    【点赞msg】点赞 {} 个 (无用户信息)", like_msg.count);
+                println!("Diagnostic: message_parsers.rs:106 (details omitted)");
             }
             Ok(None) // 点赞消息通常不直接作为弹幕显示在列表
         }
         Err(e) => {
-            eprintln!("    【X】Failed to parse LikeMessage in parser: {}", e);
+            eprintln!("Diagnostic: message_parsers.rs:111 (details omitted)");
             Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
     }
@@ -120,12 +104,12 @@ pub fn parse_room_stats_message(
     _current_room_id: &str,
 ) -> Result<Option<DanmakuFrontendPayload>, Box<dyn std::error::Error + Send + Sync>> {
     match RoomStatsMessage::decode(payload) {
-        Ok(stats_msg) => {
-            println!("    【直播间统计msg】{}", stats_msg.display_long);
+        Ok(_stats_msg) => {
+            println!("Diagnostic: message_parsers.rs:124 (details omitted)");
             Ok(None) // 统计信息通常不作为普通弹幕显示
         }
         Err(e) => {
-            eprintln!("    【X】Failed to parse RoomStatsMessage in parser: {}", e);
+            eprintln!("Diagnostic: message_parsers.rs:128 (details omitted)");
             Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
     }

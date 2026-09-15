@@ -73,7 +73,7 @@ export const loadStoredVolume = (): number | null => {
     }
     return null;
   } catch (error) {
-    console.warn('[Player] Failed to load stored volume:', error);
+    console.warn('Diagnostic: constants.ts:76 (details omitted)');
     return null;
   }
 };
@@ -86,7 +86,7 @@ export const persistStoredVolume = (volume: number) => {
     const clamped = Math.min(1, Math.max(0, volume));
     window.localStorage.setItem(PLAYER_VOLUME_STORAGE_KEY, String(clamped));
   } catch (error) {
-    console.warn('[Player] Failed to persist volume:', error);
+    console.warn('Diagnostic: constants.ts:89 (details omitted)');
   }
 };
 
@@ -116,7 +116,7 @@ export const loadDanmuPreferences = (): { enabled: boolean; settings: DanmuUserS
       },
     };
   } catch (error) {
-    console.warn('[DanmuPreferences] Failed to load preferences:', error);
+    console.warn('Diagnostic: constants.ts:119 (details omitted)');
     return null;
   }
 };
@@ -128,7 +128,7 @@ export const persistDanmuPreferences = (payload: { enabled: boolean; settings: D
   try {
     window.localStorage.setItem(DANMU_PREFERENCES_STORAGE_KEY, JSON.stringify(payload));
   } catch (error) {
-    console.warn('[DanmuPreferences] Failed to persist preferences:', error);
+    console.warn('Diagnostic: constants.ts:131 (details omitted)');
   }
 };
 
@@ -156,7 +156,7 @@ export const applyDanmuFontFamilyForOS = async () => {
   try {
     osName = await platform();
   } catch (error) {
-    console.warn('[Player] Failed to detect platform for danmu font selection:', error);
+    console.warn('Diagnostic: constants.ts:159 (details omitted)');
     osName = '';
   }
 

@@ -591,7 +591,7 @@
   import type { StreamerDetails } from '../../platforms/common/types'
   import { fetchDouyuStreamerDetails } from '../../platforms/douyu/streamerInfoParser'
   import { getDouyinStreamerDetails } from '../../platforms/douyin/streamerInfoParser'
-  import { invoke } from '@tauri-apps/api/core'
+  import { invoke } from '../../services/platformInvoke'
   import type { UnlistenFn } from '@tauri-apps/api/event'
   import {
     ensureBilibiliLoginWindow,
@@ -692,7 +692,7 @@
         const base = await invoke<string>('start_static_proxy_server')
         proxyBase.value = base
       } catch (e) {
-        console.error('[StreamerInfo] Failed to start static proxy server', e)
+        console.error('Diagnostic: index.vue:695 (details omitted)')
       }
     }
   }
@@ -774,7 +774,7 @@
             try {
               await (loginWindow as any).close()
             } catch (closeErr) {
-              console.warn('[StreamerInfo] Failed to close bilibili login window:', closeErr)
+              console.warn('Diagnostic: index.vue:777 (details omitted)')
             }
           }
           if (props.platform === Platform.BILIBILI) {
@@ -792,7 +792,7 @@
       throw new Error('登录超时，请重试')
     } catch (e: any) {
       loginError.value = e?.message || '登录失败，请重试'
-      console.error('[StreamerInfo] handleBilibiliLogin error:', e)
+      console.error('Diagnostic: index.vue:795 (details omitted)')
     } finally {
       if (unlisten) {
         try {
@@ -848,7 +848,7 @@
         showAvatarText.value = !avatarUrl.value;
         emitDetails(mapped);
       } catch (e: any) {
-        console.error(`[StreamerInfo] HUYA fetchRoomDetails error for ${props.roomId}:`, e);
+        console.error('Diagnostic: index.vue:851 (details omitted)');
         error.value = e?.message || '获取虎牙房间信息失败';
         roomDetails.value = null;
         await ensureProxyStarted();
@@ -860,22 +860,6 @@
       return;
     }
 
-    if (props.platform === Platform.CUSTOM_M3U8) {
-      roomDetails.value = {
-        roomId: props.roomId,
-        platform: 'custom-m3u8',
-        roomTitle: props.title || '自定义 M3U8',
-        nickname: props.anchorName || '自定义 M3U8',
-        avatarUrl: props.avatar || null,
-        isLive: true,
-      };
-      avatarUrl.value = normalizeAvatarUrl(props.avatar || '');
-      showAvatarText.value = !avatarUrl.value;
-      emitDetails(roomDetails.value);
-      isLoading.value = false;
-      error.value = null;
-      return;
-    }
 
     // 新增：B 站主播信息
     if (props.platform === Platform.BILIBILI) {
@@ -906,7 +890,7 @@
         showAvatarText.value = !avatarUrl.value;
         emitDetails(mapped);
       } catch (e: any) {
-        console.error(`[StreamerInfo] BILIBILI fetchRoomDetails error for ${props.roomId}:`, e);
+        console.error('Diagnostic: index.vue:893 (details omitted)');
         error.value = e?.message || '获取 B 站房间信息失败';
         roomDetails.value = null;
         await ensureProxyStarted();
@@ -929,7 +913,7 @@
         avatarUrl.value = normalizeAvatarUrl(roomDetails.value?.avatarUrl || avatarUrl.value);
         emitDetails(roomDetails.value);
       } else {
-        console.warn(`[StreamerInfo] Unsupported platform: ${props.platform}`);
+        console.warn('Diagnostic: index.vue:916 (details omitted)');
         throw new Error(`Unsupported platform: ${props.platform}`);
       }
 
@@ -938,7 +922,7 @@
       }
 
     } catch (e: any) {
-      console.error(`[StreamerInfo] Error in fetchRoomDetails for ${props.platform}/${props.roomId}:`, e)
+      console.error('Diagnostic: index.vue:925 (details omitted)')
       error.value = e.message || 'Failed to load streamer details'
       showAvatarText.value = true
     } finally {
@@ -962,7 +946,7 @@
   }
   
   const handleAvatarError = () => {
-    console.warn(`[StreamerInfo] Avatar image failed to load for ${computedNickname.value} (URL: ${avatarUrl.value}). Displaying fallback.`);
+    console.warn('Diagnostic: index.vue:949 (details omitted)');
     showAvatarText.value = true;
   };
   

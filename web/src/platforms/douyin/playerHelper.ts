@@ -1,12 +1,12 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../services/platformInvoke';
 import { listen, type Event as TauriEvent } from '@tauri-apps/api/event';
 import { Ref } from 'vue';
 import { Platform } from '../common/types';
 import type { DanmakuMessage, DanmuOverlayInstance, DanmuOverlayResolver, DanmuRenderOptions, RustGetStreamUrlPayload } from '../../components/player/types';
-import type { LiveStreamInfo, StreamVariant } from '../common/types';
+import type { LiveStreamInfo } from '../common/types';
 import { v4 as uuidv4 } from 'uuid';
 
-const isAndroidRuntime = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '');
+import { selectPlaybackVariant, type PlaybackConfig } from '../common/playback';
 
 
 export interface DouyinRustDanmakuPayload {
@@ -17,142 +17,41 @@ export interface DouyinRustDanmakuPayload {
   fans_club_level: number; // from Rust's i32
 }
 
-export async function fetchAndPrepareDouyinStreamConfig(roomId: string, quality: string = '原画'): Promise<{ 
-  streamUrl: string | null;
-  streamType: string | undefined; 
-  title?: string | null; 
-  anchorName?: string | null; 
-  avatar?: string | null; 
-  isLive: boolean; 
-  initialError: string | null; // Made non-optional, will always be string or null
+/**
+ * Resolves a Douyin room and maps actual SDK qualities to the existing controls.
+ * @param roomId Numeric room identifier.
+ * @param quality Requested quality label.
+ * @param line Requested returned line key.
+ * @returns Playback metadata or an actionable error.
+ * @throws No exceptions; failures are returned in initialError.
+ */
+export async function fetchAndPrepareDouyinStreamConfig(
+  roomId: string,
+  quality = '原画',
+  line?: string | null,
+): Promise<PlaybackConfig & {
+  title?: string | null; anchorName?: string | null; avatar?: string | null;
+  isLive: boolean; initialError: string | null;
 }> {
-  if (!roomId) {
-    return { streamUrl: null, streamType: undefined, title: null, anchorName: null, avatar: null, isLive: false, initialError: '房间ID未提供' };
-  }
-
   try {
-    const payloadData = { args: { room_id_str: roomId } };
-    const backendQuality = normalizeDouyinQuality(quality);
-    // 使用画质参数调用抖音画质切换API
-    const result = await invoke<LiveStreamInfo>('get_douyin_live_stream_url_with_quality', { 
-      payload: payloadData,
-      quality: backendQuality 
+    const result = await invoke<LiveStreamInfo>('get_douyin_live_stream_url_with_quality', {
+      payload: { args: { room_id_str: roomId.trim() } }, quality,
     });
-
-    if (result.error_message) {
-      console.error(`[DouyinPlayerHelper] Error from backend for room ${roomId}: ${result.error_message}`);
-      return {
-        streamUrl: null,
-        streamType: undefined,
-        title: result.title,
-        anchorName: result.anchor_name,
-        avatar: result.avatar,
-        isLive: result.status === 2,
-        initialError: result.error_message, // string | null from Rust
-      };
+    if (result.error_message) throw new Error(result.error_message);
+    const metadata = { title: result.title, anchorName: result.anchor_name, avatar: result.avatar };
+    if (result.status !== 2) {
+      return { ...metadata, streamUrl: '', streamType: undefined, isLive: false, initialError: '主播未开播。' };
     }
-
-    const streamAvailable = result.status === 2 && !!result.stream_url;
-    let streamType: string | undefined = undefined;
-    let uiMessage: string | null = null; 
-
-    const androidHlsVariant = streamAvailable ? selectAndroidDouyinHlsVariant(result.available_streams, backendQuality) : null;
-    const rawStreamUrl = (isAndroidRuntime && androidHlsVariant?.url) ? androidHlsVariant.url : (result.stream_url ?? null);
-    const sanitizedStreamUrl = streamAvailable && rawStreamUrl ? enforceHttps(rawStreamUrl) : null;
-
-    if (streamAvailable && rawStreamUrl) {
-      const lowerUrl = rawStreamUrl.toLowerCase();
-      if (isAndroidRuntime && androidHlsVariant?.url) {
-        streamType = 'hls';
-      } else if (rawStreamUrl.startsWith('http://127.0.0.1') && rawStreamUrl.endsWith('/live.flv')) {
-        streamType = 'flv';
-      } else if (lowerUrl.includes('pull-hls') || lowerUrl.endsWith('.m3u8')) {
-        streamType = 'hls';
-      } else if (lowerUrl.includes('pull-flv') || lowerUrl.includes('.flv')) {
-        streamType = 'flv';
-      } else {
-        console.warn(`[DouyinPlayerHelper] Could not determine stream type for URL: ${rawStreamUrl}. Defaulting to ${isAndroidRuntime ? 'hls' : 'flv'}.`);
-        streamType = isAndroidRuntime ? 'hls' : 'flv';
-      }
-      // uiMessage remains null if stream is available and no prior error.
-    } else {
-      if (result.status !== 2) {
-        uiMessage = result.title ? `主播 ${result.anchor_name || ''} 未开播。` : '主播未开播或房间不存在。';
-      } else {
-        uiMessage = '主播在线，但获取直播流失败。';
-      }
-    }
-
     return {
-      streamUrl: sanitizedStreamUrl,
-      streamType: streamType,
-      title: result.title,
-      anchorName: result.anchor_name,
-      avatar: result.avatar,
-      isLive: streamAvailable,
-      initialError: uiMessage, // uiMessage is definitely string or null here.
+      ...metadata, ...selectPlaybackVariant(result.available_streams ?? [], quality, line),
+      isLive: true, initialError: null,
+      headers: { Referer: 'https://live.douyin.com/', 'User-Agent': navigator.userAgent },
     };
-
-  } catch (e: any) {
-    console.error(`[DouyinPlayerHelper] Exception while fetching Douyin stream details for ${roomId}:`, e);
-    return { 
-        streamUrl: null, 
-        streamType: undefined, 
-        title: null, 
-        anchorName: null, 
-        avatar: null, 
-        isLive: false, 
-        initialError: e.message || '获取直播信息失败: 未知错误' // Ensure string here
-    };
+  } catch (error: unknown) {
+    console.error('Diagnostic: playerHelper.ts:51 (details omitted)');
+    return { streamUrl: '', streamType: undefined, isLive: false,
+      initialError: error instanceof Error ? error.message : String(error) };
   }
-}
-
-function normalizeDouyinQuality(input: string): string {
-  const upper = input.trim().toUpperCase();
-  if (upper === 'OD' || upper === '原画') return 'OD';
-  if (upper === 'BD' || upper === '标清') return 'BD';
-  if (upper === 'UHD' || upper === '高清') return 'UHD';
-  return 'OD';
-}
-
-function selectAndroidDouyinHlsVariant(
-  variants: StreamVariant[] | null | undefined,
-  requestedQuality: string,
-): StreamVariant | null {
-  if (!isAndroidRuntime || !Array.isArray(variants) || variants.length === 0) {
-    return null;
-  }
-
-  const hlsVariants = variants.filter((variant) => {
-    const url = (variant?.url || '').toLowerCase();
-    const format = (variant?.format || '').toLowerCase();
-    const protocol = (variant?.protocol || '').toLowerCase();
-    return Boolean(url) && (
-      format === 'hls' ||
-      protocol === 'hls' ||
-      url.includes('.m3u8') ||
-      url.includes('pull-hls')
-    );
-  });
-
-  if (hlsVariants.length === 0) {
-    return null;
-  }
-
-  const preferredKeys = requestedQuality === 'OD'
-    ? ['ORIGIN', 'FULL_HD1']
-    : requestedQuality === 'UHD'
-      ? ['FULL_HD1', 'ORIGIN']
-      : ['HD1', 'SD1', 'SD2'];
-
-  for (const key of preferredKeys) {
-    const matched = hlsVariants.find((variant) => (variant.desc || '').toUpperCase() === key);
-    if (matched?.url) {
-      return matched;
-    }
-  }
-
-  return hlsVariants[0] || null;
 }
 
 export async function startDouyinDanmakuListener(
@@ -168,12 +67,11 @@ export async function startDouyinDanmakuListener(
     args: { room_id_str: roomId }, 
     platform: Platform.DOUYIN, 
   };
-  await invoke('start_douyin_danmu_listener', { payload: rustPayload });
   
   const eventName = 'danmaku-message';
 
   const unlisten = await listen<DouyinRustDanmakuPayload>(eventName, (event: TauriEvent<DouyinRustDanmakuPayload>) => {
-    if (event.payload) {
+    if (event.payload?.room_id === roomId) {
       const rustP = event.payload;
       const frontendDanmaku: DanmakuMessage = {
         id: uuidv4(),
@@ -203,7 +101,7 @@ export async function startDouyinDanmakuListener(
             },
           });
         } catch (emitError) {
-          console.warn('[DouyinPlayerHelper] Failed emitting danmu.js comment:', emitError);
+          console.warn('Diagnostic: playerHelper.ts:104 (details omitted)');
         }
       }
       const shouldAppend = renderOptions?.shouldAppendToList ? renderOptions.shouldAppendToList(frontendDanmaku) : true;
@@ -215,6 +113,12 @@ export async function startDouyinDanmakuListener(
       }
     }
   });
+  try {
+    await invoke('start_douyin_danmu_listener', { payload: rustPayload });
+  } catch (error) {
+    unlisten();
+    throw error;
+  }
   return unlisten;
 }
 
@@ -229,19 +133,7 @@ export async function stopDouyinDanmaku(currentUnlistenFn: (() => void) | null):
     };
     await invoke('start_douyin_danmu_listener', { payload: rustPayload });
   } catch (error) {
-    console.error('[DouyinPlayerHelper] Error stopping Douyin danmaku listener:', error);
+    console.error('Diagnostic: playerHelper.ts:136 (details omitted)');
   }
 }
 
-function enforceHttps(url: string): string {
-  if (!url) {
-    return url;
-  }
-  if (url.startsWith('https://')) {
-    return url;
-  }
-  if (url.startsWith('http://')) {
-    return `https://${url.slice('http://'.length)}`;
-  }
-  return url;
-}

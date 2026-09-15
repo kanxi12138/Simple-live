@@ -322,7 +322,6 @@
 .xgplayer-refresh-control,
 .xgplayer-quality-control,
 .xgplayer-line-control,
-.xgplayer-background-audio-control,
 .xgplayer-danmu-toggle,
 .xgplayer-danmu-settings,
 .xgplayer-volume-control {
@@ -342,7 +341,6 @@
 .xgplayer-refresh-control:hover,
 .xgplayer-quality-control:hover,
 .xgplayer-line-control:hover,
-.xgplayer-background-audio-control:hover,
 .xgplayer-danmu-toggle:hover,
 .xgplayer-danmu-settings:hover,
 .xgplayer-volume-control:hover {
@@ -362,7 +360,6 @@
 .xgplayer-refresh-control svg,
 .xgplayer-quality-control svg,
 .xgplayer-line-control svg,
-.xgplayer-background-audio-control svg,
 .xgplayer-danmu-toggle svg,
 .xgplayer-danmu-settings svg,
 .xgplayer-volume-control svg {
@@ -464,51 +461,49 @@
   box-shadow: 0 0 10px rgba(255, 255, 255, 0.45);
 }
 
-.xgplayer-background-audio-control {
-  display: none;
-  gap: 8px;
-  white-space: nowrap;
+.xgplayer .stream-control-group {
+  display: contents;
 }
 
-.xgplayer-is-fullscreen .xgplayer-background-audio-control,
-.xgplayer-is-cssfullscreen .xgplayer-background-audio-control {
-  display: inline-flex;
-}
+@media (orientation: portrait) and (max-width: 768px) {
+  .xgplayer:is(.xgplayer-is-fullscreen, .xgplayer-is-cssfullscreen) .xgplayer-controls {
+    height: 96px;
+  }
 
-.xgplayer-background-audio-control .background-audio-switch {
-  position: relative;
-  width: 30px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-}
+  .xgplayer:is(.xgplayer-is-fullscreen, .xgplayer-is-cssfullscreen) .xg-inner-controls {
+    height: 88px;
+    align-items: flex-end;
+    left: 8px;
+    right: 8px;
+  }
 
-.xgplayer-background-audio-control .switch-track {
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.22);
-  transition: background 0.2s ease;
-}
+  .xgplayer:is(.xgplayer-is-fullscreen, .xgplayer-is-cssfullscreen) :is(.xg-left-grid, .xg-right-grid) {
+    position: static;
+    height: 40px;
+    flex-wrap: nowrap;
+  }
 
-.xgplayer-background-audio-control .switch-thumb {
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
-  transform: translateX(1px);
-  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s ease;
-}
+  .xgplayer:is(.xgplayer-is-fullscreen, .xgplayer-is-cssfullscreen) xg-icon {
+    margin-left: 0;
+    margin-right: 0;
+    flex-shrink: 0;
+  }
 
-.xgplayer-background-audio-control.is-enabled .switch-track {
-  background: var(--player-accent-gradient);
-}
+  .xgplayer:is(.xgplayer-is-fullscreen, .xgplayer-is-cssfullscreen) .stream-control-group {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
 
-.xgplayer-background-audio-control.is-enabled .switch-thumb {
-  background: #1a1a1a;
-  transform: translateX(15px);
+  .xgplayer:is(.xgplayer-is-fullscreen, .xgplayer-is-cssfullscreen) .volume-slider {
+    width: 48px;
+  }
 }
 
 .xgplayer xg-icon {
@@ -1470,8 +1465,8 @@ html.web-fs-active .danmu-panel {
   }
 
   .danmu-panel {
-    height: 180px;
-    flex-basis: 180px;
+    height: 280px;
+    flex-basis: 280px;
     margin-right: 0;
     border-radius: 18px;
     border-left: 1px solid rgba(255, 255, 255, 0.08);

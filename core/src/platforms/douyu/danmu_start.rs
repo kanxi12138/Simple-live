@@ -121,15 +121,12 @@ impl DanmakuClient {
         &self,
         stop_rx: &mut oneshot::Receiver<()>,
     ) -> Result<ConnectionOutcome, Box<dyn std::error::Error>> {
-        eprintln!(
-            "[Douyu Danmaku {}] Connecting websocket to danmuproxy.douyu.com:8506",
-            self.room_id
-        );
+        eprintln!("Diagnostic: danmu_start.rs:124 (details omitted)");
         let url = Url::parse(DOUYU_DANMAKU_URL)?;
         let (ws_stream, _) = timeout(Duration::from_secs(10), connect_async(url.as_str()))
             .await
             .map_err(|_| "Douyu websocket connect timeout")??;
-        eprintln!("[Douyu Danmaku {}] Websocket connected", self.room_id);
+        eprintln!("Diagnostic: danmu_start.rs:132 (details omitted)");
 
         let (mut write, mut read) = ws_stream.split();
         let login_message = format!("type@=loginreq/roomid@={}/", self.room_id);
@@ -175,7 +172,7 @@ impl DanmakuClient {
         loop {
             tokio::select! {
                 _ = &mut *stop_rx => {
-                    eprintln!("[Douyu Danmaku {}] Stop signal received", room_id);
+                    eprintln!("Diagnostic: danmu_start.rs:178 (details omitted)");
                     send_task.abort();
                     return Ok(ConnectionOutcome::Stop);
                 }
@@ -195,18 +192,18 @@ impl DanmakuClient {
                                 Self::emit_chat_message(&window, &room_id, &parsed, &mut has_logged_first_type);
                             }
                         }
-                        Some(Ok(Message::Close(frame))) => {
-                            eprintln!("[Douyu Danmaku {}] Websocket closed: {:?}", room_id, frame);
+                        Some(Ok(Message::Close(_))) => {
+                            eprintln!("Diagnostic: danmu_start.rs:199 (details omitted)");
                             send_task.abort();
                             return Ok(ConnectionOutcome::Disconnected);
                         }
-                        Some(Err(error)) => {
-                            eprintln!("[Douyu Danmaku {}] Websocket error: {}", room_id, error);
+                        Some(Err(_)) => {
+                            eprintln!("Diagnostic: danmu_start.rs:204 (details omitted)");
                             send_task.abort();
                             return Ok(ConnectionOutcome::Disconnected);
                         }
                         None => {
-                            eprintln!("[Douyu Danmaku {}] Websocket stream ended", room_id);
+                            eprintln!("Diagnostic: danmu_start.rs:209 (details omitted)");
                             send_task.abort();
                             return Ok(ConnectionOutcome::Disconnected);
                         }
@@ -239,11 +236,8 @@ impl DanmakuClient {
         has_logged_first_type: &mut bool,
     ) {
         if !*has_logged_first_type {
-            if let Some(message_type) = message.get("type") {
-                eprintln!(
-                    "[Douyu Danmaku {}] Received first message type {}",
-                    room_id, message_type
-                );
+            if let Some(_) = message.get("type") {
+                eprintln!("Diagnostic: danmu_start.rs:243 (details omitted)");
                 *has_logged_first_type = true;
             }
         }
@@ -293,23 +287,20 @@ impl DanmakuClient {
         let mut stop_rx = std::mem::replace(&mut self.stop_signal_rx, oneshot::channel().1);
         let mut backoff_secs = 1u64;
 
-        loop {
+        for _attempt in 0..3 {
             let outcome = self.run_connection(&mut stop_rx).await?;
             match outcome {
                 ConnectionOutcome::Stop => {
-                    eprintln!("[Douyu Danmaku {}] Listener stopped", self.room_id);
+                    eprintln!("Diagnostic: danmu_start.rs:300 (details omitted)");
                     break;
                 }
                 ConnectionOutcome::Disconnected => {
-                    eprintln!(
-                        "[Douyu Danmaku {}] Disconnected, retrying in {}s",
-                        self.room_id, backoff_secs
-                    );
+                    eprintln!("Diagnostic: danmu_start.rs:304 (details omitted)");
                     let sleep_future = sleep(Duration::from_secs(backoff_secs));
                     tokio::select! {
                         _ = sleep_future => {}
                         _ = &mut stop_rx => {
-                            eprintln!("[Douyu Danmaku {}] Stop signal received during backoff", self.room_id);
+                            eprintln!("Diagnostic: danmu_start.rs:312 (details omitted)");
                             break;
                         }
                     }

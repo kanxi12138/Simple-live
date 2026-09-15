@@ -1,3 +1,4 @@
+use crate::platforms::common::request_limit::LimitedRequest;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default, Clone)]
@@ -11,13 +12,10 @@ pub async fn generate_bilibili_w_webid(
 ) -> Result<String, String> {
     let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
     let url = "https://live.bilibili.com/lol";
-    println!("[Bilibili] Generating w_webid: GET {}", url);
-    println!(
-        "[Bilibili] Headers: User-Agent={}, Referer={} ",
-        ua, "https://www.bilibili.com/"
-    );
+    println!("Diagnostic: state.rs:14 (details omitted)");
+    println!("Diagnostic: state.rs:15 (details omitted)");
 
-    let client = reqwest::Client::builder()
+    let client = reqwest::Client::builder().redirect(crate::network_policy::redirects())
         .user_agent(ua)
         .no_proxy()
         .build()
@@ -26,7 +24,7 @@ pub async fn generate_bilibili_w_webid(
     let resp = client
         .get(url)
         .header("Referer", "https://www.bilibili.com/")
-        .send()
+        .send_limited()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
 
@@ -71,7 +69,7 @@ pub async fn generate_bilibili_w_webid(
     }
 
     let w_webid = access_id.ok_or_else(|| "Failed to extract w_webid (access_id)".to_string())?;
-    println!("[Bilibili] w_webid extracted: {}", w_webid);
+    println!("Diagnostic: state.rs:74 (details omitted)");
     {
         let mut guard = state.w_webid.lock().unwrap();
         *guard = Some(w_webid.clone());

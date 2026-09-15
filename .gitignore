@@ -53,12 +53,18 @@ tauri.settings.gradle
 /app-arm64-release.apk
 /app/keystore/
 
-# Git ignore itself (local only, do not track)
-.gitignore
-
 # Claude Code instructions (local only)
 CLAUDE.md
 
 # Temporary tools and caches
 _tmp_tools/
 .reasonix/
+
+# Release artifacts and private signing material
+*.apk
+*.aab
+*.jks
+*.p12
+*.pfx
+.env
+.env.*

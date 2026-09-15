@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../services/platformInvoke';
 import { isTauriRuntime, openExternal } from './host';
 import { RELEASES_PAGE, type LatestReleaseInfo } from '../services/updateChecker';
 

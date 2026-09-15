@@ -4,12 +4,13 @@ use reqwest;
 use std::collections::HashMap;
 use std::panic;
 use std::sync::{Arc, Mutex};
-use tauri::Emitter;
 use tokio::sync::oneshot;
 
 mod config_transfer;
 mod platforms;
 mod proxy;
+mod network_policy;
+mod stream_proxy;
 mod update_release;
 
 use platforms::common::{DouyinDanmakuState, FollowHttpClient, HuyaDanmakuState};
@@ -29,7 +30,15 @@ use platforms::huya::{fetch_huya_live_list, start_huya_danmaku_listener};
 
 #[derive(Default, Clone)]
 pub struct StreamUrlStore {
-    pub url: Arc<Mutex<String>>,
+    pub source: Arc<Mutex<StreamSource>>,
+}
+
+/// Validated upstream state copied into each playback proxy session.
+#[derive(Default, Clone)]
+pub struct StreamSource {
+    pub url: String,
+    pub headers: reqwest::header::HeaderMap,
+    pub format: String,
 }
 
 #[derive(Default, Clone)]
@@ -56,10 +65,25 @@ async fn get_stream_url_with_quality_cmd(
 #[tauri::command]
 async fn set_stream_url_cmd(
     url: String,
+    headers: Option<HashMap<String, String>>,
+    format: Option<String>,
     state: tauri::State<'_, StreamUrlStore>,
 ) -> Result<(), String> {
-    let mut current_url = state.url.lock().unwrap();
-    *current_url = url;
+    let parsed = reqwest::Url::parse(&url).map_err(|error| error.to_string())?;
+    if network_policy::stream_platform(&parsed).is_none() {
+        return Err("播放地址不属于受支持的平台 CDN".to_string());
+    }
+    let mut request_headers = reqwest::header::HeaderMap::new();
+    for (name, value) in headers.unwrap_or_default() {
+        if !matches!(name.to_ascii_lowercase().as_str(), "referer" | "user-agent" | "origin") {
+            return Err("Unsupported playback header".into());
+        }
+        let name = reqwest::header::HeaderName::from_bytes(name.as_bytes()).map_err(|error| error.to_string())?;
+        let value = reqwest::header::HeaderValue::from_str(&value).map_err(|error| error.to_string())?;
+        request_headers.insert(name, value);
+    }
+    let format = format.unwrap_or_else(|| if parsed.path().ends_with(".m3u8") { "hls" } else { "flv" }.to_string());
+    *state.source.lock().map_err(|error| error.to_string())? = StreamSource { url, headers: request_headers, format };
     Ok(())
 }
 
@@ -96,18 +120,12 @@ async fn start_danmaku_listener(
         {
             Ok(Ok(info)) if !info.room_id.trim().is_empty() => info.room_id,
             Ok(Ok(_)) => requested_room_id.clone(),
-            Ok(Err(error)) => {
-                eprintln!(
-                    "[Douyu Danmaku] Failed to normalize room id {}: {}. Fallback to original id",
-                    requested_room_id, error
-                );
+            Ok(Err(_)) => {
+                eprintln!("Diagnostic: lib.rs:125 (details omitted)");
                 requested_room_id.clone()
             }
             Err(_) => {
-                eprintln!(
-                    "[Douyu Danmaku] Timed out normalizing room id {}. Fallback to original id",
-                    requested_room_id
-                );
+                eprintln!("Diagnostic: lib.rs:132 (details omitted)");
                 requested_room_id.clone()
             }
         };
@@ -116,11 +134,8 @@ async fn start_danmaku_listener(
             window_clone,
             stop_rx,
         );
-        if let Err(error) = client.start().await {
-            eprintln!(
-                "[Rust Main] Douyu danmaku client for room {} failed: {}",
-                normalized_room_id, error
-            );
+        if let Err(_) = client.start().await {
+            eprintln!("Diagnostic: lib.rs:145 (details omitted)");
         }
     });
 
@@ -155,7 +170,7 @@ async fn search_anchor(
 }
 
 fn create_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
+    reqwest::Client::builder().redirect(crate::network_policy::redirects())
         .user_agent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
         .no_proxy()
         .build()
@@ -185,7 +200,7 @@ fn build_app() -> tauri::Builder<tauri::Wry> {
             get_stream_url_with_quality_cmd,
             set_stream_url_cmd,
             platforms::douyu::stream_url::fetch_douyu_room_init_cmd,
-            platforms::douyu::stream_url::fetch_douyu_home_h5_enc_cmd,
+            platforms::douyu::stream_url::sign_douyu_request,
             platforms::douyu::stream_url::fetch_douyu_play_info_cmd,
             platforms::douyu::stream_url::fetch_douyu_play_url_cmd,
             search_anchor,
@@ -213,6 +228,7 @@ fn build_app() -> tauri::Builder<tauri::Wry> {
             fetch_douyin_room_info,
             fetch_douyin_streamer_info,
             search_douyin_live_rooms,
+            platforms::douyin::account_search::search_douyin_accounts,
             fetch_huya_live_list,
             platforms::huya::danmaku::fetch_huya_join_params,
             platforms::huya::stream_url::get_huya_unified_cmd,
@@ -249,8 +265,8 @@ fn build_app() -> tauri::Builder<tauri::Wry> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    panic::set_hook(Box::new(|info| {
-        eprintln!("[panic] {}", info);
+    panic::set_hook(Box::new(|_info| {
+        eprintln!("Diagnostic: lib.rs:279 (details omitted)");
     }));
 
     build_app()

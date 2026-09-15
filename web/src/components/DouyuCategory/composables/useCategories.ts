@@ -1,5 +1,5 @@
 import { ref, computed, Ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '../../../services/platformInvoke'
 import type { Category1, Category2, Category3 } from '../types'
 
 export function useCategories(
@@ -22,11 +22,11 @@ export function useCategories(
   }
 
   const fetchCategories = async () => {
-    console.log('开始获取分类数据')
+    console.log('Diagnostic: useCategories.ts:25 (details omitted)')
     try {
       // invoke now directly returns the object with cate1List or throws an error
       const response = await invoke('fetch_categories') as RustFrontendCategoryResponse;
-      console.log('获取到的已解析分类数据:', response)
+      console.log('Diagnostic: useCategories.ts:29 (details omitted)')
 
       // On success, response directly contains cate1List.
       // Errors are caught by the catch block.
@@ -59,7 +59,7 @@ export function useCategories(
         cate2List.value = allCate2;
       }
     } catch (error) {
-      console.error('获取分类数据失败:', error)
+      console.error('Diagnostic: useCategories.ts:62 (details omitted)')
       throw error; // Re-throw for upstream handling
     }
   }

@@ -85,17 +85,17 @@ const loadStreamerDetails = async (currentRoomId: string) => {
     if (result?.errorMessage) {
       detailsError.value = result.errorMessage;
       streamerDetails.value = null;
-      console.warn(`[DouyuPlayerView] Error from fetchDouyuStreamerDetails: ${result.errorMessage}`);
+      console.warn('Diagnostic: DouyuPlayerView.vue:88 (details omitted)');
     } else if (!result || !result.nickname) {
       detailsError.value = '获取到的主播信息无效或不完整。';
       streamerDetails.value = null;
-      console.warn('[DouyuPlayerView] Invalid or incomplete data from backend.', result);
+      console.warn('Diagnostic: DouyuPlayerView.vue:92 (details omitted)');
     } else {
       streamerDetails.value = result;
       detailsError.value = null;
     }
   } catch (error: unknown) {
-    console.error(`[DouyuPlayerView] Exception while loading streamer details for ${currentRoomId}:`, error);
+    console.error('Diagnostic: DouyuPlayerView.vue:98 (details omitted)');
     detailsError.value = error instanceof Error ? error.message : '加载主播详情时发生未知错误。';
     streamerDetails.value = null;
   } finally {
@@ -128,7 +128,7 @@ const handleUnfollow = () => {
 };
 
 const handleClosePlayer = () => {
-  console.log('[DouyuPlayerView] Close button clicked. Navigating to Douyu home.');
+  console.log('Diagnostic: DouyuPlayerView.vue:131 (details omitted)');
   router.replace('/');
 };
 
@@ -144,7 +144,7 @@ const handleRefreshDetails = () => {
     void loadStreamerDetails(props.roomId);
     return;
   }
-  console.warn('[DouyuPlayerView] request-refresh-details received but no roomId available.');
+  console.warn('Diagnostic: DouyuPlayerView.vue:147 (details omitted)');
 };
 
 const handlePlayerReload = () => {

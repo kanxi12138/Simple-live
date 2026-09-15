@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '../services/platformInvoke'
 
 export const useBilibiliStore = defineStore('bilibili', {
   state: () => ({

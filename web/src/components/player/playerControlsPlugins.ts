@@ -354,11 +354,13 @@ export class QualityControl extends Plugin {
       btn.type = 'button';
       btn.className = 'xgplayer-quality-item';
       btn.innerHTML = `
-        <span class="quality-name">${option}</span>
+        <span class="quality-name"></span>
         <svg class="quality-check" width="12" height="12" viewBox="0 0 12 12" fill="none">
           <path d="M3 6.5l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       `;
+      const label = btn.querySelector('.quality-name');
+      if (label) label.textContent = option;
       let lastTriggeredAt = 0;
       const handleSelect = (event: Event) => {
         event.stopPropagation();
@@ -376,7 +378,7 @@ export class QualityControl extends Plugin {
           const callback = this.config.onSelect;
           actionResult = typeof callback === 'function' ? callback(option) : undefined;
         } catch (error) {
-          console.error('[QualityControl] onSelect error:', error);
+          console.error('Diagnostic: playerControlsPlugins.ts:379 (details omitted)');
           actionResult = undefined;
         }
         Promise.resolve(actionResult).finally(() => {
@@ -638,7 +640,7 @@ export class LineControl extends Plugin {
       btn.className = 'xgplayer-quality-item';
       btn.dataset.lineKey = option.key;
       btn.innerHTML = `
-        <span class="quality-name">${option.label}</span>
+        <span class="quality-name"></span>
         <svg class="quality-check" width="12" height="12" viewBox="0 0 12 12" fill="none">
           <path d="M3 6.5l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
@@ -660,7 +662,7 @@ export class LineControl extends Plugin {
           const callback = this.config.onSelect;
           actionResult = typeof callback === 'function' ? callback(option.key) : undefined;
         } catch (error) {
-          console.error('[LineControl] onSelect error:', error);
+          console.error('Diagnostic: playerControlsPlugins.ts:663 (details omitted)');
           actionResult = undefined;
         }
         Promise.resolve(actionResult).finally(() => {
@@ -747,93 +749,3 @@ export class LineControl extends Plugin {
   }
 }
 
-/**
- * Provides a fullscreen-only switch for arming Android background audio.
- */
-export class BackgroundAudioControl extends Plugin {
-  static override pluginName = 'backgroundAudioControl';
-  static override defaultConfig = {
-    position: POSITIONS.CONTROLS_RIGHT,
-    index: 5.3,
-    disable: false,
-    getState: (() => false) as () => boolean,
-    onToggle: ((_enabled: boolean) => {}) as (enabled: boolean) => void,
-  };
-
-  private handleToggle: ((event: Event) => void) | null = null;
-  private lastToggleAt = 0;
-
-  /**
-   * Renders the background-audio switch.
-   *
-   * @returns The xgplayer control markup, or an empty string when disabled.
-   */
-  override render() {
-    if (this.config.disable) {
-      return '';
-    }
-    return `<xg-icon class="xgplayer-background-audio-control" title="后台听">
-      <span class="background-audio-label">后台听</span>
-      <span class="background-audio-switch" aria-hidden="true">
-        <span class="switch-track"></span>
-        <span class="switch-thumb"></span>
-      </span>
-    </xg-icon>`;
-  }
-
-  /**
-   * Binds pointer input after xgplayer creates the control.
-   *
-   * @returns Nothing.
-   */
-  override afterCreate() {
-    if (this.config.disable) {
-      return;
-    }
-    this.setEnabled(this.getState());
-    this.handleToggle = (event: Event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const now = Date.now();
-      if (now - this.lastToggleAt < 220) {
-        return;
-      }
-      this.lastToggleAt = now;
-      const enabled = !this.getState();
-      this.config.onToggle(enabled);
-      this.setEnabled(this.getState());
-    };
-    this.bind(['click', 'touchend'], this.handleToggle);
-  }
-
-  /**
-   * Removes listeners owned by the control.
-   *
-   * @returns Nothing.
-   */
-  override destroy() {
-    if (this.handleToggle) {
-      this.unbind(['click', 'touchend'], this.handleToggle);
-      this.handleToggle = null;
-    }
-  }
-
-  /**
-   * Synchronizes the rendered switch with the current armed state.
-   *
-   * @param enabled Whether background audio is armed for this room.
-   * @returns Nothing.
-   */
-  setEnabled(enabled: boolean) {
-    const root = this.root as HTMLElement | null;
-    root?.classList.toggle('is-enabled', enabled);
-    root?.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-    root?.setAttribute('title', enabled ? '关闭后台听' : '开启后台听');
-  }
-
-  private getState() {
-    return typeof this.config.getState === 'function'
-      ? Boolean(this.config.getState())
-      : false;
-  }
-}

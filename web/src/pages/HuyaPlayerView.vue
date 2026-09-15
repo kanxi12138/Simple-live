@@ -54,7 +54,7 @@ const handleUnfollow = () => {
 };
 
 const handleClosePlayer = () => {
-  console.log('[HuyaPlayerView] Close button clicked. Navigating to Huya home.');
+  console.log('Diagnostic: HuyaPlayerView.vue:57 (details omitted)');
   router.replace('/huya');
 };
 

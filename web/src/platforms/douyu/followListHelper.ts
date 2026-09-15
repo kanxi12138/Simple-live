@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../services/platformInvoke';
 import type { FollowedStreamer, LiveStatus } from '../common/types';
 
 // This interface should match the DouyuFollowInfo struct returned by Rust
@@ -38,15 +38,13 @@ export async function refreshDouyuFollowedStreamer(
           currentLiveStatus = 'LIVE';
         } else {
           currentLiveStatus = 'OFFLINE'; 
-          console.warn(`[DouyuFollowHelper] Room ${roomInfo.room_id}: show_status is 1, but video_loop is unexpected (${vLoop}). Defaulting to OFFLINE.`);
+          console.warn('Diagnostic: followListHelper.ts:41 (details omitted)');
         }
       } else { // Any show_status other than 1 (e.g., 2 or null/missing)
         currentLiveStatus = 'OFFLINE';
       }
       
-      console.log(
-        `[DouyuFollowHelper] Refresh for ID: ${streamer.id} - Nick: ${roomInfo.nickname ?? 'N/A'}, Title: ${roomInfo.room_name ?? 'N/A'}, show_status: ${sStatus ?? 'N/A'}, video_loop: ${vLoop ?? 'N/A'}, Calculated LiveStatus: ${currentLiveStatus}`
-      );
+      console.log('Diagnostic: followListHelper.ts:47 (details omitted)');
 
       return {
         liveStatus: currentLiveStatus,
@@ -55,17 +53,11 @@ export async function refreshDouyuFollowedStreamer(
         avatarUrl: roomInfo.avatar_url ?? streamer.avatarUrl,
       };
     } else { 
-      console.warn(
-        `[DouyuFollowHelper] Received null/undefined room data for streamer ${streamer.id}. Got: ${roomInfo?.room_id}. Full roomInfo:`, 
-        roomInfo
-      );
+      console.warn('Diagnostic: followListHelper.ts:58 (details omitted)');
       return { liveStatus: 'OFFLINE' }; 
     }
   } catch (e: any) { 
-    console.error(
-      `[DouyuFollowHelper] Error invoking/processing 'fetch_douyu_room_info' for ${streamer.id}. Error:`, 
-      e 
-    );
+    console.error('Diagnostic: followListHelper.ts:65 (details omitted)');
     return { liveStatus: 'UNKNOWN' }; // Or 'OFFLINE' - UNKNOWN signals an error state more clearly
   }
 } 

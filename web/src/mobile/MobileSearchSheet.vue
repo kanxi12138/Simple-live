@@ -5,7 +5,7 @@
         <div class="sheet-header">
           <div>
             <strong>搜索直播间</strong>
-            <p>即时反馈，优先保持输入和跳转的丝滑。</p>
+            <p>{{ localPlatform === 'douyin' ? '输入直播关键字或抖音号' : '选择平台，输入关键词或数字房间号。' }}</p>
           </div>
           <button type="button" class="close-btn" @click="handleClose">关闭</button>
         </div>
@@ -33,27 +33,39 @@
             @input="handleInput"
             @keydown.enter.prevent="runSearchNow"
           />
-          <button type="button" class="submit-btn" @click="runSearchNow">
+          <button type="button" class="submit-btn" aria-label="搜索直播间" :disabled="!trimmedQuery" @click="runSearchNow">
             <Search :size="17" />
           </button>
         </div>
 
-        <div class="results">
-          <div v-if="isLoading" class="state">搜索中...</div>
-          <div v-else-if="errorMessage" class="state state--error">{{ errorMessage }}</div>
-          <div v-else-if="!results.length && trimmedQuery" class="state">没有找到结果</div>
+        <div v-if="localPlatform === 'douyin' && douyinLoginBridge" class="login-row">
+          <span>关键词搜索需要抖音登录，房间号可直接查询。</span>
+          <button type="button" class="close-btn" @click="openDouyinLogin">抖音登录</button>
+        </div>
+
+        <div class="results" :aria-busy="isLoading">
+          <div v-if="!trimmedQuery" class="state">输入关键词或数字房间号，查找想看的直播。</div>
+          <div v-if="trimmedQuery && isLoading" class="state" role="status">搜索中...</div>
+          <div v-if="trimmedQuery && errorMessage" class="state state--error">{{ errorMessage }}</div>
+          <div v-if="hasSearched && !isLoading && !errorMessage && !results.length && trimmedQuery" class="state">没有找到结果</div>
           <button
             v-for="result in results"
-            :key="`${result.platform}:${result.roomId}`"
+            :key="`${result.platform}:${result.accountId || result.secUid || result.roomId}`"
             type="button"
             class="result-item"
+            :disabled="result.platform === Platform.DOUYIN && (!result.liveStatus || !result.roomId)"
             @click="selectAnchor(result)"
           >
-            <img v-if="result.avatar" :src="result.avatar" :alt="result.userName" class="avatar" />
+            <img loading="lazy" decoding="async" v-if="result.avatar" :src="result.avatar" :alt="result.userName" class="avatar" />
             <div v-else class="avatar avatar--fallback">{{ result.userName.slice(0, 1) }}</div>
             <div class="meta">
               <strong>{{ result.userName }}</strong>
-              <span>{{ result.roomTitle || `房间 ${result.roomId}` }}</span>
+              <template v-if="result.platform === Platform.DOUYIN">
+                <span>{{ result.kind }} · {{ result.douyinId ? `抖音号：${result.douyinId}` : '抖音号未提供' }}</span>
+                <span>{{ followerLabel(result.followers) }} · {{ statusLabel(result) }}</span>
+                <span v-if="result.roomTitle">{{ result.roomTitle }}</span>
+              </template>
+              <span v-else>{{ result.roomTitle || `房间 ${result.roomId}` }}</span>
             </div>
             <span class="status-dot" :class="{ live: result.liveStatus }"></span>
           </button>
@@ -64,23 +76,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Search } from 'lucide-vue-next';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../services/platformInvoke';
 import type { Platform as UiPlatform } from '../layout/types';
 import { Platform } from '../platforms/common/types';
 import { useImageProxy } from '../components/FollowsList/useProxy';
-
-type SearchResultItem = {
-  platform: Platform;
-  roomId: string;
-  webId?: string | null;
-  userName: string;
-  roomTitle?: string | null;
-  avatar: string | null;
-  liveStatus: boolean;
-  rawStatus?: number | null;
-};
+import { mapAccount, mergeDouyinResults, followerLabel, statusLabel } from '../platforms/douyin/searchResults';
+import type { SearchResultItem, DouyinAccountItem } from '../platforms/douyin/searchResults';
 
 interface DouyinApiStreamInfo {
   title?: string | null;
@@ -89,6 +92,20 @@ interface DouyinApiStreamInfo {
   status?: number | null;
   error_message?: string | null;
   web_rid?: string | null;
+}
+
+interface DouyinSearchItem {
+  account_id?: string | null;
+  sec_uid?: string | null;
+  douyin_id?: string | null;
+  follower_count?: number | null;
+  web_rid: string;
+  room_id: string;
+  title: string;
+  nickname: string;
+  avatar: string;
+  is_live: boolean;
+  status: number;
 }
 
 interface HuyaAnchorItem {
@@ -140,7 +157,7 @@ const platforms: Array<{ id: UiPlatform; label: string }> = [
 const inputRef = ref<HTMLInputElement | null>(null);
 
 const sanitizeSearchPlatform = (platform: UiPlatform): UiPlatform => {
-  if (platform === 'custom' || platform === 'custom-m3u8') {
+  if (platform === 'custom') {
     return 'douyu';
   }
   return platform;
@@ -150,7 +167,20 @@ const localPlatform = ref<UiPlatform>(sanitizeSearchPlatform(props.activePlatfor
 const query = ref('');
 const results = ref<SearchResultItem[]>([]);
 const isLoading = ref(false);
+const hasSearched = ref(false);
 const errorMessage = ref('');
+const douyinLoginBridge = (window as unknown as {
+  DTVDouyinLogin?: { getCookie: () => string; openLogin: () => void };
+}).DTVDouyinLogin;
+
+/** Opens official Douyin login; reports bridge failures in the search panel. */
+const openDouyinLogin = () => {
+  try {
+    douyinLoginBridge?.openLogin();
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error);
+  }
+};
 const requestToken = ref(0);
 let debounceTimer: number | null = null;
 
@@ -160,7 +190,7 @@ const trimmedQuery = computed(() => query.value.trim());
 const placeholderText = computed(() => {
   if (localPlatform.value === 'douyu') return '搜索斗鱼主播名称/房间号';
   if (localPlatform.value === 'huya') return '搜索虎牙主播名称/房间号';
-  if (localPlatform.value === 'douyin') return '搜索抖音主播/房间号';
+  if (localPlatform.value === 'douyin') return '输入直播关键字或抖音号';
   if (localPlatform.value === 'bilibili') return '搜索B站主播名称/房间号';
   return '搜索主播/房间';
 });
@@ -169,6 +199,7 @@ watch(
   () => props.visible,
   async (visible) => {
     if (!visible) {
+      resetState();
       return;
     }
     localPlatform.value = sanitizeSearchPlatform(props.activePlatform);
@@ -181,12 +212,15 @@ watch(
   () => props.activePlatform,
   (platform) => {
     if (props.visible) {
+      resetState();
       localPlatform.value = sanitizeSearchPlatform(platform);
     }
   },
 );
 
 const resetState = () => {
+  hasSearched.value = false;
+  requestToken.value += 1;
   results.value = [];
   errorMessage.value = '';
   isLoading.value = false;
@@ -203,6 +237,7 @@ const handleClose = () => {
 };
 
 const setPlatform = (platform: UiPlatform) => {
+  resetState();
   localPlatform.value = platform;
   if (trimmedQuery.value) {
     void runSearchNow();
@@ -210,6 +245,10 @@ const setPlatform = (platform: UiPlatform) => {
 };
 
 const handleInput = () => {
+  hasSearched.value = false;
+  requestToken.value += 1;
+  results.value = [];
+  errorMessage.value = '';
   if (debounceTimer !== null) {
     window.clearTimeout(debounceTimer);
   }
@@ -220,10 +259,14 @@ const handleInput = () => {
   isLoading.value = true;
   debounceTimer = window.setTimeout(() => {
     void runSearchNow();
-  }, 260);
+  }, 400);
 };
 
 const runSearchNow = async () => {
+  if (debounceTimer !== null) {
+    window.clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
   if (!trimmedQuery.value) {
     resetState();
     return;
@@ -231,6 +274,8 @@ const runSearchNow = async () => {
 
   const currentToken = requestToken.value + 1;
   requestToken.value = currentToken;
+  results.value = [];
+  hasSearched.value = false;
   errorMessage.value = '';
   isLoading.value = true;
 
@@ -251,10 +296,11 @@ const runSearchNow = async () => {
     }
   } catch (error) {
     if (requestToken.value === currentToken) {
-      errorMessage.value = '搜索失败，请重试。';
+      results.value = [];
+      errorMessage.value = error instanceof Error ? error.message : String(error || '搜索失败，请重试。');
       isLoading.value = false;
     }
-    console.error('[MobileSearchSheet] search failed:', error);
+    console.error('Diagnostic: MobileSearchSheet.vue:303 (details omitted)');
   }
 };
 
@@ -262,6 +308,7 @@ const commitResults = (currentToken: number, nextResults: SearchResultItem[]) =>
   if (requestToken.value !== currentToken) {
     return;
   }
+  hasSearched.value = true;
   results.value = nextResults;
   isLoading.value = false;
   errorMessage.value = '';
@@ -282,7 +329,26 @@ const runDouyuSearch = async (keyword: string, currentToken: number) => {
   );
 };
 
-const runDouyinSearch = async (keyword: string, currentToken: number) => {
+const fetchDouyinRooms = async (keyword: string, cookie: string | null): Promise<SearchResultItem[]> => {
+  if (!/^\d+$/.test(keyword)) {
+    const items = await invoke<DouyinSearchItem[]>('search_douyin_live_rooms', { keyword, page: 1, cookie });
+    return items.map((item) => ({
+      platform: Platform.DOUYIN,
+      roomId: item.web_rid || item.room_id,
+      webId: item.web_rid || null,
+      userName: item.nickname,
+      roomTitle: item.title,
+      avatar: item.avatar || null,
+      liveStatus: item.is_live,
+      rawStatus: item.status,
+      accountId: item.account_id,
+      secUid: item.sec_uid,
+      douyinId: item.douyin_id,
+      followers: item.follower_count,
+      roomAliases: [item.web_rid, item.room_id].filter(Boolean),
+      kind: '直播间',
+    }));
+  }
   const info = await invoke<DouyinApiStreamInfo>('fetch_douyin_streamer_info', {
     payload: { args: { room_id_str: keyword } },
   });
@@ -296,13 +362,42 @@ const runDouyinSearch = async (keyword: string, currentToken: number) => {
         avatar: info.avatar || null,
         liveStatus: info.status === 2,
         rawStatus: info.status ?? null,
+        kind: '直播间',
       }]
     : [];
   if (!nextResults.length && info?.error_message) {
     throw new Error(info.error_message);
   }
 
-  commitResults(currentToken, nextResults);
+  return nextResults;
+};
+
+/** Runs both sources independently, retaining partial results and invalidating late replies. */
+const runDouyinSearch = async (keyword: string, currentToken: number) => {
+  const cookie = douyinLoginBridge?.getCookie() || null;
+  const sourceResults: SearchResultItem[][] = [[], []];
+  const sourceErrors = ['', ''];
+  let remaining = 2;
+  const requests = [
+    async () => (await invoke<DouyinAccountItem[]>('search_douyin_accounts', { keyword, page: 1, cookie })).map(mapAccount),
+    async () => fetchDouyinRooms(keyword, cookie),
+  ];
+  await Promise.all(requests.map(async (request, index) => {
+    try {
+      sourceResults[index] = await request();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      sourceErrors[index] = `${index === 0 ? '账号' : '直播间'}：${message}`;
+    } finally {
+      remaining -= 1;
+      if (requestToken.value === currentToken) {
+        results.value = mergeDouyinResults(sourceResults[0], sourceResults[1]);
+        errorMessage.value = sourceErrors.filter(Boolean).join('；');
+        isLoading.value = remaining > 0;
+        hasSearched.value = remaining === 0;
+      }
+    }
+  }));
 };
 
 const runHuyaSearch = async (keyword: string, currentToken: number) => {
@@ -322,7 +417,7 @@ const runHuyaSearch = async (keyword: string, currentToken: number) => {
 };
 
 const runBilibiliSearch = async (keyword: string, currentToken: number) => {
-  const items = await invoke<BilibiliSearchItem[]>('search_bilibili_rooms', { keyword, page: 1 });
+  const items = await invoke<BilibiliSearchItem[]>('search_bilibili_rooms', { keyword, page: 1, cookie: localStorage.getItem('bilibili_cookie') || null });
   await ensureProxyStarted();
   commitResults(
     currentToken,
@@ -339,6 +434,7 @@ const runBilibiliSearch = async (keyword: string, currentToken: number) => {
 };
 
 const selectAnchor = (result: SearchResultItem) => {
+  if (result.platform === Platform.DOUYIN && (!result.liveStatus || !result.roomId)) return;
   emit('select-anchor', {
     id: result.webId || result.roomId,
     platform: result.platform,
@@ -347,6 +443,19 @@ const selectAnchor = (result: SearchResultItem) => {
   });
   handleClose();
 };
+
+/** Retries the active keyword using fresh native cookies after the login view closes. */
+const handleDouyinLoginClosed = () => {
+  if (props.visible && localPlatform.value === 'douyin' && trimmedQuery.value) {
+    void runSearchNow();
+  }
+};
+
+onMounted(() => window.addEventListener('dtv-douyin-login-closed', handleDouyinLoginClosed));
+onUnmounted(() => {
+  resetState();
+  window.removeEventListener('dtv-douyin-login-closed', handleDouyinLoginClosed);
+});
 </script>
 
 <style scoped>
@@ -372,6 +481,20 @@ const selectAnchor = (result: SearchResultItem) => {
   box-shadow: var(--mobile-sheet-shadow);
 }
 
+.login-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--mobile-text-secondary);
+  font-size: 12px;
+}
+
+.login-row button {
+  flex-shrink: 0;
+}
+
 .sheet-header {
   display: flex;
   justify-content: space-between;
@@ -387,7 +510,7 @@ const selectAnchor = (result: SearchResultItem) => {
 .sheet-header p {
   margin: 4px 0 0;
   color: var(--mobile-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .close-btn,
@@ -400,7 +523,7 @@ const selectAnchor = (result: SearchResultItem) => {
 
 .close-btn {
   min-width: 56px;
-  min-height: 36px;
+  min-height: 44px;
   font-weight: 700;
 }
 
@@ -425,7 +548,7 @@ const selectAnchor = (result: SearchResultItem) => {
   background: var(--mobile-pill-bg);
   color: var(--mobile-text-secondary);
   font-weight: 700;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .platform-pill.active {
@@ -478,7 +601,7 @@ const selectAnchor = (result: SearchResultItem) => {
 }
 
 .state--error {
-  color: #fda4af;
+  color: var(--error-color);
 }
 
 .result-item {
@@ -530,7 +653,7 @@ const selectAnchor = (result: SearchResultItem) => {
 
 .meta span {
   color: var(--mobile-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .status-dot {
@@ -562,5 +685,39 @@ const selectAnchor = (result: SearchResultItem) => {
 .sheet-fade-enter-from .search-sheet,
 .sheet-fade-leave-to .search-sheet {
   transform: translateY(18px);
+}
+
+.close-btn:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+button:active:not(:disabled) {
+  background-color: var(--mobile-pill-active-bg);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.result-item:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.sheet-header strong {
+  line-height: 1.4;
+}
+
+.sheet-header p {
+  line-height: 1.6;
 }
 </style>

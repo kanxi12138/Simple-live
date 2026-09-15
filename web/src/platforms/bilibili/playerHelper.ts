@@ -1,115 +1,32 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../services/platformInvoke';
 import { listen, type Event as TauriEvent } from '@tauri-apps/api/event';
-import type { LiveStreamInfo, StreamVariant } from '../common/types';
+import { selectPlaybackVariant, type PlaybackConfig } from '../common/playback';
+import type { LiveStreamInfo } from '../common/types';
 import type { Ref } from 'vue';
 import type { DanmakuMessage, DanmuOverlayInstance, DanmuOverlayResolver, DanmuRenderOptions } from '../../components/player/types';
 import { v4 as uuidv4 } from 'uuid';
 
+/** Resolves actual Bilibili streams; propagates platform and room-state errors. */
 export async function getBilibiliStreamConfig(
   roomId: string,
   quality: string = '原画',
   cookie?: string,
-): Promise<{ streamUrl: string; streamType: string | undefined }> {
-  if (!roomId) {
-    throw new Error('Missing Bilibili room ID');
+  line?: string | null,
+): Promise<PlaybackConfig> {
+  try {
+    const result = await invoke<LiveStreamInfo & { qualities: string[]; headers: Record<string, string> }>(
+      'get_bilibili_live_stream_url_with_quality', {
+        payload: { args: { room_id_str: roomId } }, quality,
+        cookie: cookie || localStorage.getItem('bilibili_cookie') || null,
+      },
+    );
+    if (result.error_message) throw new Error(result.error_message);
+    if (result.status !== 1) throw new Error('B站主播未开播');
+    return { ...selectPlaybackVariant(result.available_streams || [], quality, line, result.qualities), headers: result.headers };
+  } catch (error) {
+    console.error('Diagnostic: playerHelper.ts:27 (details omitted)');
+    throw error;
   }
-
-  const payloadData = { args: { room_id_str: roomId } };
-  const effectiveCookie =
-    cookie ?? (typeof localStorage !== 'undefined' ? (localStorage.getItem('bilibili_cookie') || undefined) : undefined);
-
-  const result = await invoke<LiveStreamInfo>('get_bilibili_live_stream_url_with_quality', {
-    payload: payloadData,
-    quality,
-    cookie: effectiveCookie || null,
-  });
-
-  if (result.error_message) {
-    const msg = result.error_message.trim();
-    if (msg.includes('未开播')) {
-      throw new Error(msg);
-    }
-    throw new Error('Bilibili stream URL is unavailable');
-  }
-
-  if (typeof result.status !== 'undefined' && result.status !== 1) {
-    throw new Error('Bilibili streamer is offline');
-  }
-
-  if (!result.stream_url) {
-    throw new Error('Bilibili stream URL is unavailable');
-  }
-
-  if (result.upstream_url) {
-    console.info('[Bilibili] Upstream url:', result.upstream_url);
-  }
-  if (result.available_streams && Array.isArray(result.available_streams)) {
-    console.info(`[Bilibili] Available streams: ${result.available_streams.length}`);
-    (result.available_streams as StreamVariant[]).forEach((variant, index) => {
-      const meta = [variant.format, variant.desc, variant.qn?.toString(), variant.protocol].filter(Boolean).join(' | ');
-      console.info(`  [${index + 1}] ${variant.url}${meta ? `  <<< ${meta}` : ''}`);
-    });
-  }
-
-  let streamType: string | undefined;
-  const streamUrlLower = result.stream_url.toLowerCase();
-
-  if (
-    streamUrlLower.startsWith('http://127.0.0.1') ||
-    streamUrlLower.includes('/live.flv') ||
-    streamUrlLower.includes('.flv')
-  ) {
-    streamType = 'flv';
-  } else if (streamUrlLower.includes('.m3u8')) {
-    streamType = 'hls';
-  }
-
-  if (!streamType && result.available_streams && Array.isArray(result.available_streams)) {
-    const matchedVariant = (result.available_streams as StreamVariant[]).find((variant) => {
-      if (!variant?.url) {
-        return false;
-      }
-      const formatLower = variant.format?.toLowerCase() ?? '';
-      const protocolLower = variant.protocol?.toLowerCase() ?? '';
-      const isSameAsPrimary = variant.url === result.stream_url || variant.url === result.upstream_url;
-      const isHlsCandidate =
-        formatLower === 'ts' ||
-        formatLower === 'fmp4' ||
-        formatLower === 'mp4' ||
-        formatLower === 'm4s' ||
-        protocolLower.includes('hls');
-      return isSameAsPrimary && isHlsCandidate;
-    });
-
-    if (matchedVariant) {
-      streamType = 'hls';
-    }
-  }
-
-  if (!streamType && result.upstream_url) {
-    const upstreamLower = result.upstream_url.toLowerCase();
-    if (upstreamLower.includes('.m3u8')) {
-      streamType = 'hls';
-    } else if (
-      upstreamLower.startsWith('http://127.0.0.1') ||
-      upstreamLower.includes('/live.flv') ||
-      upstreamLower.includes('.flv')
-    ) {
-      streamType = 'flv';
-    }
-  }
-
-  if (!streamType) {
-    streamType = 'flv';
-  }
-
-  return {
-    streamUrl: withLocalProxyCacheBust(result.stream_url, {
-      roomId,
-      quality,
-    }),
-    streamType,
-  };
 }
 
 interface UnifiedRustDanmakuPayload {
@@ -168,7 +85,7 @@ export async function startBilibiliDanmakuListener(
           },
         });
       } catch (emitError) {
-        console.warn('[BilibiliPlayerHelper] Failed emitting danmu.js comment:', emitError);
+        console.warn('Diagnostic: playerHelper.ts:88 (details omitted)');
       }
     }
 
@@ -200,25 +117,10 @@ export async function stopBilibiliDanmaku(currentUnlistenFn: (() => void) | null
   if (currentUnlistenFn) {
     try {
       currentUnlistenFn();
-    } catch {}
+    } catch (error) { console.warn('Diagnostic: playerHelper.ts:120 (details omitted)'); }
   }
   try {
     await invoke('stop_bilibili_danmaku_listener');
-  } catch {}
+  } catch (error) { console.warn('Diagnostic: playerHelper.ts:124 (details omitted)'); }
 }
 
-function withLocalProxyCacheBust(
-  url: string,
-  options: { roomId: string; quality?: string | null },
-): string {
-  if (!url.startsWith('http://127.0.0.1:')) {
-    return url;
-  }
-  const next = new URL(url);
-  next.searchParams.set('_dtv_room', options.roomId);
-  if (options.quality) {
-    next.searchParams.set('_dtv_quality', options.quality);
-  }
-  next.searchParams.set('_dtv_t', String(Date.now()));
-  return next.toString();
-}

@@ -49,8 +49,8 @@ const items = [
     10px 14px
     calc(var(--mobile-bottom-nav-safe-gap) + env(safe-area-inset-bottom));
   background: var(--mobile-topbar-bg);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border-top: 1px solid var(--mobile-topbar-border);
   min-height: var(--mobile-bottom-nav-height);
 }

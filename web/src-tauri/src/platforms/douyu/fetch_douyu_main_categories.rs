@@ -1,3 +1,4 @@
+use crate::platforms::common::request_limit::LimitedRequest;
 use reqwest::header::USER_AGENT;
 use serde::{Deserialize, Serialize};
 use tauri::command;
@@ -135,7 +136,7 @@ fn transform_raw_to_frontend_items(
 
 #[command]
 pub async fn fetch_categories() -> Result<CategoriesApiResponse, String> {
-    log::info!("[API Command] fetch_categories called");
+    log::info!("Diagnostic: fetch_douyu_main_categories.rs:138 (details omitted)");
     match fetch_categories_douyu_raw().await {
         Ok(raw_data) => {
             let frontend_data = transform_raw_to_frontend_items(raw_data);
@@ -144,7 +145,7 @@ pub async fn fetch_categories() -> Result<CategoriesApiResponse, String> {
             })
         }
         Err(e) => {
-            log::error!("[API Command] Error in fetch_categories: {}", e);
+            log::error!("Diagnostic: fetch_douyu_main_categories.rs:147 (details omitted)");
             Err(e)
         }
     }
@@ -152,7 +153,7 @@ pub async fn fetch_categories() -> Result<CategoriesApiResponse, String> {
 
 // Internal function to fetch and parse to the old frontend-specific structure
 async fn fetch_categories_douyu_raw() -> Result<Vec<RawFrontendCate1Item>, String> {
-    let client = reqwest::Client::builder()
+    let client = reqwest::Client::builder().redirect(crate::network_policy::redirects())
         .no_proxy()
         .build()
         .map_err(|e| e.to_string())?;
@@ -161,7 +162,7 @@ async fn fetch_categories_douyu_raw() -> Result<Vec<RawFrontendCate1Item>, Strin
     let response = client
         .get(url)
         .header(USER_AGENT, "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1")
-        .send()
+        .send_limited()
         .await;
 
     match response {

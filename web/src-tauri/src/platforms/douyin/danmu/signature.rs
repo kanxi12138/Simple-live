@@ -38,23 +38,24 @@ fn evaluate_sign_js(md5_param: &str) -> Result<String, Box<dyn std::error::Error
     runtime
         .execute_script("[bootstrap]", FastString::from_static(bootstrap_script))
         .map_err(|e| {
-            eprintln!("Error during deno_core bootstrap script: {}", e);
+            eprintln!("Diagnostic: signature.rs:41 (details omitted)");
             e
         })?;
 
     runtime
         .execute_script("./sign.js", FastString::from_static(SIGN_JS_CONTENT))
         .map_err(|e| {
-            eprintln!("Error during deno_core eval of sign.js: {}", e);
+            eprintln!("Diagnostic: signature.rs:48 (details omitted)");
             e
         })?;
 
-    let call_script = format!("get_sign('{}')", md5_param);
+    let user_agent = serde_json::to_string(crate::platforms::douyin::web_api::DEFAULT_USER_AGENT)?;
+    let call_script = format!("getMSSDKSignature('{md5_param}', {user_agent})");
     let fast_call_script = FastString::from(call_script);
     let result = runtime
         .execute_script("[call_get_sign]", fast_call_script)
         .map_err(|e| {
-            eprintln!("Error during deno_core call to get_sign: {}", e);
+            eprintln!("Diagnostic: signature.rs:58 (details omitted)");
             e
         })?;
 
@@ -89,7 +90,8 @@ fn evaluate_sign_js(md5_param: &str) -> Result<String, Box<dyn std::error::Error
         .eval(SIGN_JS_CONTENT)
         .map_err(|e| format!("Error during quick-js eval of sign.js: {e}"))?;
 
-    let call_script = format!("get_sign('{}')", md5_param);
+    let user_agent = serde_json::to_string(crate::platforms::douyin::web_api::DEFAULT_USER_AGENT)?;
+    let call_script = format!("getMSSDKSignature('{md5_param}', {user_agent})");
     context
         .eval_as::<String>(&call_script)
         .map_err(|e| format!("Error during quick-js call to get_sign: {e}").into())
@@ -128,18 +130,21 @@ pub async fn generate_signature(
         tpl_params_vec.push(format!("{}={}", key_str, value));
     }
     let to_sign_str = tpl_params_vec.join(",");
-    println!("[Rust] String to MD5 for signature: {}", to_sign_str);
+    println!("Diagnostic: signature.rs:133 (details omitted)");
 
     // Use md_5 crate for MD5 computation
     let mut hasher = Md5::new();
     hasher.update(to_sign_str.as_bytes());
     let digest_bytes = hasher.finalize();
     let md5_param = format!("{:x}", digest_bytes);
-    println!("[Rust] MD5 param for signature: {}", md5_param);
+    println!("Diagnostic: signature.rs:140 (details omitted)");
 
-    let signature = evaluate_sign_js(&md5_param)?;
-    println!("[Rust] Final signature: {}", signature);
-    Ok(signature)
+    const SIGNATURE_ATTEMPTS: usize = 16;
+    for _ in 0..SIGNATURE_ATTEMPTS {
+        let signature = evaluate_sign_js(&md5_param)?;
+        if !signature.contains(['-', '=']) { return Ok(signature); }
+    }
+    Err("抖音 WebSocket 签名生成失败".into())
 }
 
 pub fn generate_ms_token(length: usize) -> String {

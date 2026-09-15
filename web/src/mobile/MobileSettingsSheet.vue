@@ -5,7 +5,7 @@
         <div class="sheet-header">
           <div>
             <strong>设置与迁移</strong>
-            <p>保留配置导入导出，移动端改成文件流方案。</p>
+            <p>备份关注与偏好，或从已有备份恢复。</p>
           </div>
           <button
             type="button"
@@ -26,7 +26,7 @@
             <Download :size="18" />
             <div>
               <strong>{{ exporting ? '导出中...' : '导出配置' }}</strong>
-              <span>关注、分组、主题、播放器偏好、B 站登录态。</span>
+              <span>关注、分组、主题、播放器偏好。</span>
             </div>
           </button>
 
@@ -56,6 +56,7 @@
           </button>
         </div>
 
+        <LegalNotices />
         <div class="section-card">
           <strong>检查更新</strong>
           <div class="action-row">
@@ -124,6 +125,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import LegalNotices from '../components/Common/LegalNotices.vue';
 import { Download, Github, Upload } from 'lucide-vue-next';
 
 const props = defineProps<{
@@ -175,6 +177,7 @@ const handleConfirmImport = () => {
 .sheet {
   width: 100%;
   max-height: min(74vh, 720px);
+  overflow-y: auto;
   border-radius: 24px 24px 0 0;
   padding: 18px 16px calc(16px + env(safe-area-inset-bottom));
   background: var(--mobile-surface);
@@ -198,7 +201,7 @@ const handleConfirmImport = () => {
 
 .sheet-header p {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--mobile-text-secondary);
 }
 
@@ -241,7 +244,7 @@ const handleConfirmImport = () => {
   display: block;
   margin-top: 4px;
   color: var(--mobile-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -275,7 +278,7 @@ const handleConfirmImport = () => {
 
 .update-message {
   margin: 10px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--mobile-text-secondary);
 }
 
@@ -335,7 +338,7 @@ const handleConfirmImport = () => {
 
 .status {
   margin: 14px 0 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .status--info {
@@ -402,7 +405,7 @@ const handleConfirmImport = () => {
   border-radius: 10px;
   background: var(--mobile-surface-muted);
   color: var(--mobile-text-primary);
-  font-size: 12px;
+  font-size: 13px;
   font-family: monospace;
   resize: vertical;
   outline: none;
@@ -411,5 +414,34 @@ const handleConfirmImport = () => {
 
 .import-textarea:focus {
   border-color: var(--accent);
+}
+
+.close-btn:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+button:active:not(:disabled) {
+  background-color: var(--mobile-pill-active-bg);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sheet-header strong {
+  line-height: 1.4;
+}
+
+.sheet-header p {
+  line-height: 1.6;
 }
 </style>

@@ -5,7 +5,7 @@ export interface CommonStreamer {
   avatar: string;
   room_cover: string;
   viewer_count_str: string;
-  platform: 'huya' | 'douyin' | 'douyu' | 'bilibili' | 'custom-m3u8' | string;
+  platform: 'huya' | 'douyin' | 'douyu' | 'bilibili' | string;
   web_id?: string;
   actual_room_id?: string;
 }

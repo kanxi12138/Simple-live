@@ -3,8 +3,7 @@ export type Platform =
   | 'douyu'
   | 'huya'
   | 'douyin'
-  | 'bilibili'
-  | 'custom-m3u8';
+  | 'bilibili';
 
 export interface Streamer {
   id: string;

@@ -1,3 +1,4 @@
+use crate::platforms::common::request_limit::LimitedRequest;
 use crate::platforms::common::types_rust::{CommonPlatformCategoryRust, SupportedPlatformRust};
 use log::{error, info};
 use serde::Deserialize;
@@ -43,12 +44,10 @@ pub async fn fetch_three_cate(tag_id: i32) -> Result<Vec<CommonPlatformCategoryR
         "https://capi.douyucdn.cn/api/v1/getThreeCate?tag_id={}&client_sys=android",
         tag_id_str
     );
-    info!(
-        "[API Command] fetch_three_cate called for tag_id: {}",
-        tag_id_str
-    );
+    info!("Diagnostic: three_cate.rs:46 (details omitted)");
 
-    match reqwest::get(&url).await {
+    match reqwest::Client::builder().redirect(crate::network_policy::redirects()).build()
+        .map_err(|error| error.to_string())?.get(&url).send_limited().await {
         Ok(response) => {
             if response.status().is_success() {
                 let body_text = response
@@ -65,12 +64,12 @@ pub async fn fetch_three_cate(tag_id: i32) -> Result<Vec<CommonPlatformCategoryR
                                         transform_three_cate_to_common(items_list, &tag_id_str);
                                     Ok(common_data)
                                 } else {
-                                    info!("[API Command] fetch_three_cate for {} returned success but empty list (data array was empty).", tag_id_str);
+                                    info!("Diagnostic: three_cate.rs:68 (details omitted)");
                                     Ok(Vec::new()) // Return empty vec if list is empty but no API error
                                 }
                             } else {
                                 // This case means the "data" field was null or missing, but error code was 0.
-                                info!("[API Command] fetch_three_cate for {} returned success but data field was null or missing.", tag_id_str);
+                                info!("Diagnostic: three_cate.rs:73 (details omitted)");
                                 Ok(Vec::new())
                             }
                         } else {
@@ -91,10 +90,7 @@ pub async fn fetch_three_cate(tag_id: i32) -> Result<Vec<CommonPlatformCategoryR
                     .text()
                     .await
                     .unwrap_or_else(|_| "Unknown error from API".to_string());
-                error!(
-                    "fetch_three_cate API request failed for tag_id {} with status {}: {}",
-                    tag_id_str, status, error_text
-                );
+                error!("Diagnostic: three_cate.rs:94 (details omitted)");
                 Err(format!(
                     "API request failed for tag_id {} with status {}: {}",
                     tag_id_str, status, error_text
@@ -102,10 +98,7 @@ pub async fn fetch_three_cate(tag_id: i32) -> Result<Vec<CommonPlatformCategoryR
             }
         }
         Err(e) => {
-            error!(
-                "fetch_three_cate request failed for tag_id {}: {}",
-                tag_id_str, e
-            );
+            error!("Diagnostic: three_cate.rs:105 (details omitted)");
             Err(format!("Request failed for tag_id {}: {}", tag_id_str, e))
         }
     }

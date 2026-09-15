@@ -1,6 +1,6 @@
 import { ref } from 'vue';
 import type { Ref } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../../services/platformInvoke';
 import type { CommonStreamer } from '../../../platforms/common/streamerTypes';
 
 interface DouyuStreamer {
@@ -131,7 +131,7 @@ export function useDouyuLiveRooms(
 
       currentPage.value = pageToFetch;
     } catch (e) {
-      console.error('[useDouyuLiveRooms] invoke error', e);
+      console.error('Diagnostic: useDouyuLiveRooms.ts:134 (details omitted)');
       if (pageToFetch === 0) rooms.value = [];
       hasMore.value = false;
     } finally {
@@ -199,7 +199,7 @@ export function useDouyuLiveRooms(
       const newRooms = (resp.data.list || []).map(mapDouyuItemToCommon);
       appendUniqueRooms(newRooms);
     } catch (e) {
-      console.error('[useDouyuLiveRooms] append invoke error', e);
+      console.error('Diagnostic: useDouyuLiveRooms.ts:202 (details omitted)');
     } finally {
       isLoadingMore.value = false;
     }

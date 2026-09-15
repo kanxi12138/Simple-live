@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "dtv"
-version = "5.2.0"
+version = "5.2.1"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -1440,6 +1440,7 @@ dependencies = [
  "awc",
  "base64 0.21.7",
  "brotlic",
+ "bytes 0.4.12",
  "bytes 1.11.1",
  "chrono",
  "cookie 0.18.1",
@@ -1476,7 +1477,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",
- "tungstenite 0.21.0",
  "url",
  "urlencoding",
  "window-vibrancy 0.7.1",
@@ -4348,7 +4348,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
- "webpki-roots 0.25.4",
+ "webpki-roots",
  "winreg 0.50.0",
 ]
 
@@ -5759,8 +5759,8 @@ dependencies = [
  "rustls 0.21.12",
  "tokio",
  "tokio-rustls",
- "tungstenite 0.20.1",
- "webpki-roots 0.25.4",
+ "tungstenite",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -6019,28 +6019,6 @@ dependencies = [
  "thiserror 1.0.69",
  "url",
  "utf-8",
-]
-
-[[package]]
-name = "tungstenite"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ef1a641ea34f399a848dea702823bbecfb4c486f911735368f1f137cb8257e1"
-dependencies = [
- "byteorder",
- "bytes 1.11.1",
- "data-encoding",
- "http 1.4.0",
- "httparse",
- "log",
- "rand 0.8.6",
- "rustls 0.22.4",
- "rustls-pki-types",
- "sha1 0.10.6",
- "thiserror 1.0.69",
- "url",
- "utf-8",
- "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -6530,24 +6508,6 @@ name = "webpki-roots"
 version = "0.25.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
-
-[[package]]
-name = "webpki-roots"
-version = "0.26.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
-dependencies = [
- "webpki-roots 1.0.7",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "1.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52f5ee44c96cf55f1b349600768e3ece3a8f26010c05265ab73f945bb1a2eb9d"
-dependencies = [
- "rustls-pki-types",
-]
 
 [[package]]
 name = "webview2-com"

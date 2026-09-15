@@ -2,15 +2,13 @@ export type SupportedPlatform =
   | 'douyu'
   | 'bilibili'
   | 'douyin'
-  | 'huya'
-  | 'custom-m3u8';
+  | 'huya';
  
 export enum Platform {
   DOUYU = 'DOUYU',
   DOUYIN = 'DOUYIN',
   HUYA = 'HUYA',
   BILIBILI = 'BILIBILI',
-  CUSTOM_M3U8 = 'CUSTOM_M3U8',
 }
 
 export type LiveStatus = 'LIVE' | 'REPLAY' | 'OFFLINE' | 'UNKNOWN';

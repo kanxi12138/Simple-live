@@ -120,7 +120,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue';
+import { queueStreamProxy, stopStreamProxy as stopDouyuProxy } from '../../platforms/common/playbackProxy';
+import type { PlaybackConfig, PlaybackLine } from '../../platforms/common/playback';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue';
 import Player from 'xgplayer';
 import FlvPlugin from 'xgplayer-flv';
 import HlsPlugin from 'xgplayer-hls.js';
@@ -144,7 +146,6 @@ import {
   type DanmuUserSettings,
 } from './constants';
 import {
-  BackgroundAudioControl,
   DanmuSettingsControl,
   DanmuToggleControl,
   LineControl,
@@ -156,10 +157,10 @@ import { arrangeControlClusters } from './controlLayout';
 import { applyDanmuOverlayPreferences, createDanmuOverlay, ensureDanmuOverlayHost, syncDanmuEnabledState } from './danmuOverlay';
 import { registerPlayerWatchers, type PlayerProps } from './watchers';
 import { startCurrentDanmakuListener as startDanmakuListener, stopCurrentDanmakuListener as stopDanmakuListener } from './danmakuManager';
-import { getLineLabel, getLineOptionsForPlatform, persistLinePreference, resolveCurrentLineFor, resolveStoredLine } from './lineOptions';
+import { getLineLabel, persistLinePreference, resolveStoredLine } from './lineOptions';
 
 // Platform-specific player helpers
-import { getDouyuStreamConfig, isDouyuOfflineMessage, stopDouyuProxy } from '../../platforms/douyu/playerHelper';
+import { getDouyuStreamConfig, isDouyuOfflineMessage } from '../../platforms/douyu/playerHelper';
 import { fetchAndPrepareDouyinStreamConfig } from '../../platforms/douyin/playerHelper';
 import { getHuyaStreamConfig } from '../../platforms/huya/playerHelper';
 import { getBilibiliStreamConfig } from '../../platforms/bilibili/playerHelper';
@@ -168,7 +169,7 @@ import StreamerInfo from '../StreamerInfo/index.vue';
 import DanmuList from '../DanmuList/index.vue';
 import LoadingDots from '../Common/LoadingDots.vue';
 
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../services/platformInvoke';
 import { useImageProxy } from '../FollowsList/useProxy';
 
 // Ensure image proxy helpers are available in this component
@@ -223,7 +224,6 @@ const playerInstance = shallowRef<Player | null>(null);
 const refreshControlPlugin = shallowRef<RefreshControl | null>(null);
 const qualityControlPlugin = shallowRef<QualityControl | null>(null);
 const lineControlPlugin = shallowRef<LineControl | null>(null);
-const backgroundAudioControlPlugin = shallowRef<BackgroundAudioControl | null>(null);
 const danmuTogglePlugin = shallowRef<DanmuToggleControl | null>(null);
 const danmuSettingsPlugin = shallowRef<DanmuSettingsControl | null>(null);
 const volumeControlPlugin = shallowRef<VolumeControl | null>(null);
@@ -266,7 +266,7 @@ if (storedDanmuPreferences) {
 const osName = ref<string>('');
 
 // 画质切换相关
-const qualityOptions = ['原画', '高清', '标清'] as const;
+const qualityOptions = ref<string[]>([]);
 
 const resolveStoredQuality = (platform?: StreamingPlatform | null): string => {
   if (!platform) {
@@ -277,11 +277,11 @@ const resolveStoredQuality = (platform?: StreamingPlatform | null): string => {
   }
   try {
     const saved = window.localStorage.getItem(`${platform}_preferred_quality`);
-    if (saved && qualityOptions.includes(saved as (typeof qualityOptions)[number])) {
+    if (saved) {
       return saved;
     }
   } catch (error) {
-    console.warn('[Player] Failed to read stored quality preference:', error);
+    console.warn('Diagnostic: index.vue:284 (details omitted)');
   }
   return '原画';
 };
@@ -290,28 +290,6 @@ const currentQuality = ref<string>(resolveStoredQuality(props.platform));
 const isQualitySwitching = ref(false);
 const isRefreshingStream = ref(false);
 const isLineSwitching = ref(false);
-const isBackgroundAudioEnabled = ref(false);
-
-interface BackgroundAudioSource {
-  streamUrl: string;
-  streamType: string;
-}
-
-interface BackgroundAudioBridge {
-  disable: () => void;
-  enable: (
-    streamUrl: string,
-    streamType: string,
-    title: string,
-    anchorName: string,
-  ) => void;
-  update: (
-    streamUrl: string,
-    streamType: string,
-    title: string,
-    anchorName: string,
-  ) => void;
-}
 
 interface OrientationBridge {
   enterLandscapeFullscreen: () => void;
@@ -320,17 +298,14 @@ interface OrientationBridge {
 }
 
 type DtvWindow = Window & typeof globalThis & {
-  DTVBackgroundAudio?: BackgroundAudioBridge;
   DTVOrientation?: OrientationBridge;
   __DTV_HANDLE_ANDROID_BACK__?: () => boolean;
-  __DTV_PAUSE_WEB_PLAYER__?: () => void;
-  __DTV_RESUME_WEB_PLAYER__?: () => void;
 };
 
-let backgroundAudioSource: BackgroundAudioSource | null = null;
 
 const currentLine = ref<string | null>(resolveStoredLine(props.platform));
-const lineOptions = computed(() => getLineOptionsForPlatform(props.platform));
+const availableLines = ref<PlaybackLine[]>([]);
+const lineOptions = computed(() => availableLines.value);
 const getCurrentLineLabel = (key?: string | null) => getLineLabel(lineOptions.value, key);
 let playerInitRunId = 0;
 const isAndroidRuntime = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '');
@@ -373,7 +348,7 @@ function resetFullscreenState() {
   try {
     document.documentElement.classList.remove('web-fs-active');
   } catch (error) {
-    console.warn('[Player] Failed to reset web fullscreen flag:', error);
+    console.warn('Diagnostic: index.vue:351 (details omitted)');
   }
 }
 
@@ -426,7 +401,7 @@ function setNativeOrientation(mode: 'landscape' | 'portrait') {
     }
     bridge.enterPortraitFullscreen();
   } catch (error) {
-    console.warn(`[Player] Failed setting ${mode} orientation:`, error);
+    console.warn('Diagnostic: index.vue:404 (details omitted)');
   }
 }
 
@@ -437,7 +412,7 @@ function exitNativeFullscreen() {
   try {
     getOrientationBridge()?.exitFullscreen();
   } catch (error) {
-    console.warn('[Player] Failed exiting native fullscreen:', error);
+    console.warn('Diagnostic: index.vue:415 (details omitted)');
   }
 }
 
@@ -477,56 +452,6 @@ function bindVideoOrientation(player: Player) {
   };
 }
 
-function getBackgroundAudioBridge(): BackgroundAudioBridge | null {
-  return getDtvWindow()?.DTVBackgroundAudio ?? null;
-}
-
-function syncBackgroundAudioSource(action: 'enable' | 'update') {
-  const bridge = getBackgroundAudioBridge();
-  if (!bridge || !backgroundAudioSource) {
-    return false;
-  }
-  const invokeBridge = action === 'enable' ? bridge.enable : bridge.update;
-  invokeBridge(
-    backgroundAudioSource.streamUrl,
-    backgroundAudioSource.streamType,
-    playerTitle.value ?? '',
-    playerAnchorName.value ?? '',
-  );
-  return true;
-}
-
-function setBackgroundAudioEnabled(enabled: boolean) {
-  try {
-    if (!enabled) {
-      isBackgroundAudioEnabled.value = false;
-      getBackgroundAudioBridge()?.disable();
-      backgroundAudioControlPlugin.value?.setEnabled(false);
-      return;
-    }
-    isBackgroundAudioEnabled.value = syncBackgroundAudioSource('enable');
-    backgroundAudioControlPlugin.value?.setEnabled(isBackgroundAudioEnabled.value);
-  } catch (error) {
-    isBackgroundAudioEnabled.value = false;
-    backgroundAudioControlPlugin.value?.setEnabled(false);
-    console.error('[Player] Failed updating background audio:', error);
-  }
-}
-
-function updateBackgroundAudioSource() {
-  if (!isBackgroundAudioEnabled.value) {
-    return;
-  }
-  try {
-    if (!syncBackgroundAudioSource('update')) {
-      setBackgroundAudioEnabled(false);
-    }
-  } catch (error) {
-    setBackgroundAudioEnabled(false);
-    console.error('[Player] Failed refreshing background audio source:', error);
-  }
-}
-
 function ensureFullscreenHistoryEntry() {
   if (typeof window === 'undefined' || fullscreenHistoryActive) {
     return;
@@ -545,7 +470,7 @@ function ensureFullscreenHistoryEntry() {
     );
     fullscreenHistoryActive = true;
   } catch (error) {
-    console.warn('[Player] Failed to push fullscreen history state:', error);
+    console.warn('Diagnostic: index.vue:473 (details omitted)');
   }
 }
 
@@ -559,7 +484,7 @@ function clearFullscreenHistoryEntry() {
     window.history.back();
   } catch (error) {
     ignoreNextFullscreenPop = false;
-    console.warn('[Player] Failed to clear fullscreen history state:', error);
+    console.warn('Diagnostic: index.vue:487 (details omitted)');
   }
 }
 
@@ -625,7 +550,7 @@ function togglePlayerFullscreen(forceFullscreen?: boolean) {
       resetFullscreenState();
     }
   } catch (error) {
-    console.warn('[Player] Failed toggling fullscreen state:', error);
+    console.warn('Diagnostic: index.vue:553 (details omitted)');
     if (!shouldEnterFullscreen) {
       exitNativeFullscreen();
     }
@@ -706,7 +631,7 @@ function destroyPlayerInstance(options?: { preserveFullscreen?: boolean }) {
     try {
       document.documentElement.classList.add('web-fs-active');
     } catch (error) {
-      console.warn('[Player] Failed to preserve web fullscreen flag:', error);
+      console.warn('Diagnostic: index.vue:634 (details omitted)');
     }
   }
   if (fullscreenControlCleanup) {
@@ -720,7 +645,7 @@ function destroyPlayerInstance(options?: { preserveFullscreen?: boolean }) {
     try {
       player.destroy();
     } catch (error) {
-      console.error('[Player] Error destroying xgplayer instance:', error);
+      console.error('Diagnostic: index.vue:648 (details omitted)');
     }
     const overlayHost = player.root?.querySelector('.player-danmu-overlay') as HTMLElement | null;
     overlayHost?.remove();
@@ -732,7 +657,7 @@ function destroyPlayerInstance(options?: { preserveFullscreen?: boolean }) {
     try {
       danmu.stop?.();
     } catch (error) {
-      console.error('[Player] Error stopping danmu overlay:', error);
+      console.error('Diagnostic: index.vue:660 (details omitted)');
     }
     danmuInstance.value = null;
   }
@@ -740,7 +665,6 @@ function destroyPlayerInstance(options?: { preserveFullscreen?: boolean }) {
   refreshControlPlugin.value = null;
   qualityControlPlugin.value = null;
   lineControlPlugin.value = null;
-  backgroundAudioControlPlugin.value = null;
   danmuTogglePlugin.value = null;
   danmuSettingsPlugin.value = null;
   volumeControlPlugin.value = null;
@@ -841,7 +765,7 @@ async function mountXgPlayer(
         try {
           xhr.withCredentials = false;
         } catch (headerError) {
-          console.warn('[Player] Failed to configure HLS XHR:', headerError);
+          console.warn('Diagnostic: index.vue:768 (details omitted)');
         }
       },
     };
@@ -870,16 +794,12 @@ async function mountXgPlayer(
     try {
       player.destroy();
     } catch (error) {
-      console.error('[Player] Error destroying stale xgplayer instance:', error);
+      console.error('Diagnostic: index.vue:797 (details omitted)');
     }
     return;
   }
 
   playerInstance.value = player;
-  backgroundAudioSource = {
-    streamUrl,
-    streamType: playbackType,
-  };
   bindVideoOrientation(player);
   const storedPlayerVolume = loadStoredVolume();
   if (storedPlayerVolume !== null) {
@@ -948,7 +868,7 @@ async function mountXgPlayer(
     position: POSITIONS.CONTROLS_RIGHT,
     index: 5,
     disable: !supportsQualityForPlatform(platformCode),
-    options: [...qualityOptions],
+    options: [...qualityOptions.value],
     getCurrent: () => currentQuality.value,
     onSelect: async (option: string) => {
       if (option === currentQuality.value) {
@@ -957,7 +877,7 @@ async function mountXgPlayer(
       await switchQuality(option);
     },
   }) as QualityControl;
-  qualityControlPlugin.value?.setOptions([...qualityOptions]);
+  qualityControlPlugin.value?.setOptions([...qualityOptions.value]);
   qualityControlPlugin.value?.updateLabel(currentQuality.value);
 
   lineControlPlugin.value = player.registerPlugin(LineControl, {
@@ -977,17 +897,6 @@ async function mountXgPlayer(
   lineControlPlugin.value?.setOptions(lineOptionsForPlatform);
   lineControlPlugin.value?.updateLabel(getCurrentLineLabel(currentLine.value));
 
-  backgroundAudioControlPlugin.value = player.registerPlugin(BackgroundAudioControl, {
-    position: POSITIONS.CONTROLS_RIGHT,
-    index: 5.3,
-    disable: !isAndroidRuntime,
-    getState: () => isBackgroundAudioEnabled.value,
-    onToggle: (enabled: boolean) => {
-      setBackgroundAudioEnabled(enabled);
-    },
-  }) as BackgroundAudioControl;
-  backgroundAudioControlPlugin.value?.setEnabled(isBackgroundAudioEnabled.value);
-  updateBackgroundAudioSource();
 
   arrangeControlClusters(player);
 
@@ -1029,7 +938,7 @@ async function mountXgPlayer(
       }
       await ensureDanmakuListenerStarted();
     } catch (error) {
-      console.error('[Player] Failed starting danmaku listener after ready:', error);
+      console.error('Diagnostic: index.vue:941 (details omitted)');
     }
     overlayInstance?.play?.();
     if (pendingFullscreenRestore) {
@@ -1065,14 +974,19 @@ async function mountXgPlayer(
   });
 
   danmakuBootstrapTimer = window.setTimeout(() => {
-    void ensureDanmakuListenerStarted().catch((error) => {
-      console.error('[Player] Failed starting danmaku listener from bootstrap fallback:', error);
+    void ensureDanmakuListenerStarted().catch(() => {
+      console.error('Diagnostic: index.vue:978 (details omitted)');
     });
   }, 1500);
 
-  player.on('error', (error: any) => {
-    console.error('[Player] xgplayer error:', error);
-    streamError.value = `播放器错误: ${error?.message || error}`;
+  player.on('ended', () => {
+    void stopDouyuProxy();
+    availableLines.value = [];
+  });
+  player.on('error', () => {
+    console.error('Diagnostic: index.vue:983 (details omitted)');
+    streamError.value = '播放中断，请稍后手动重试。';
+    void stopDouyuProxy();
   });
 
   player.on('enterFullscreen', () => {
@@ -1099,7 +1013,7 @@ async function mountXgPlayer(
     try {
       document.documentElement.classList.add('web-fs-active');
     } catch (error) {
-      console.warn('[Player] Failed to set web fullscreen flag:', error);
+      console.warn('Diagnostic: index.vue:1011 (details omitted)');
     }
     ensureDanmuOverlayHost(player);
     overlayInstance = overlayInstance ?? createDanmuOverlay(player, danmuSettings, isDanmuEnabled.value);
@@ -1116,7 +1030,7 @@ async function mountXgPlayer(
         document.documentElement.classList.remove('web-fs-active');
       }
     } catch (error) {
-      console.warn('[Player] Failed to clear web fullscreen flag:', error);
+      console.warn('Diagnostic: index.vue:1028 (details omitted)');
     }
     ensureDanmuOverlayHost(player);
     overlayInstance = overlayInstance ?? createDanmuOverlay(player, danmuSettings, isDanmuEnabled.value);
@@ -1137,7 +1051,7 @@ async function mountXgPlayer(
         document.documentElement.classList.remove('web-fs-active');
       }
     } catch (error) {
-      console.warn('[Player] Failed toggling css fullscreen flag:', error);
+      console.warn('Diagnostic: index.vue:1049 (details omitted)');
     }
     ensureDanmuOverlayHost(player);
     overlayInstance = overlayInstance ?? createDanmuOverlay(player, danmuSettings, isDanmuEnabled.value);
@@ -1179,6 +1093,21 @@ async function initializePlayerAndStream(
     danmakuMessages.value = [];
   }
 
+  if (oldRoomIdForCleanup && oldPlatformForCleanup !== undefined && oldPlatformForCleanup !== null) {
+    await stopCurrentDanmakuListener(oldPlatformForCleanup, oldRoomIdForCleanup);
+  } else {
+    await stopCurrentDanmakuListener(pPlatform, pRoomId);
+  }
+  await stopDouyuProxy();
+
+  if (!isActivePlayerInitRun(initRunId)) {
+    return false;
+  }
+
+  destroyPlayerInstance({
+    preserveFullscreen: isRefresh && (isFullScreen.value || isInWebFullscreen.value || isInNativePlayerFullscreen.value),
+  });
+
   if (isOfflineStreamError(props.initialError)) {
     streamError.value = props.initialError ?? null;
     isOfflineError.value = true;
@@ -1191,27 +1120,10 @@ async function initializePlayerAndStream(
     return false;
   }
 
-  if (oldRoomIdForCleanup && oldPlatformForCleanup !== undefined && oldPlatformForCleanup !== null) {
-    await stopCurrentDanmakuListener(oldPlatformForCleanup, oldRoomIdForCleanup);
-    if (oldPlatformForCleanup === StreamingPlatform.DOUYU) {
-      await stopDouyuProxy();
-    }
-  } else {
-    await stopCurrentDanmakuListener();
-  }
-
-  if (!isActivePlayerInitRun(initRunId)) {
-    return false;
-  }
-
-  destroyPlayerInstance({
-    preserveFullscreen: isRefresh && (isFullScreen.value || isInWebFullscreen.value || isInNativePlayerFullscreen.value),
-  });
-
-  const effectiveLine = resolveCurrentLineFor(pPlatform, currentLine.value);
+  const effectiveLine = currentLine.value;
 
   try {
-    let streamConfig: { streamUrl: string; streamType: string | undefined };
+    let streamConfig: PlaybackConfig;
 
     if (pPlatform === StreamingPlatform.DOUYU) {
       if (playerIsLive.value === false) {
@@ -1222,7 +1134,7 @@ async function initializePlayerAndStream(
       }
       streamConfig = await getDouyuStreamConfig(pRoomId, currentQuality.value, effectiveLine);
     } else if (pPlatform === StreamingPlatform.DOUYIN) {
-      const douyinConfig = await fetchAndPrepareDouyinStreamConfig(pRoomId, currentQuality.value);
+      const douyinConfig = await fetchAndPrepareDouyinStreamConfig(pRoomId, currentQuality.value, effectiveLine);
       if (!isActivePlayerInitRun(initRunId)) {
         return false;
       }
@@ -1233,61 +1145,48 @@ async function initializePlayerAndStream(
 
       if (douyinConfig.initialError || !douyinConfig.isLive || !douyinConfig.streamUrl) {
         streamError.value = douyinConfig.initialError || '主播未开播或无法获取直播流。';
-        isOfflineError.value = true;
+        isOfflineError.value = isOfflineStreamError(streamError.value);
         playerIsLive.value = false;
         isLoadingStream.value = false;
-        console.warn(`[Player] Douyin config error or not live: ${streamError.value}`);
+        console.warn('Diagnostic: index.vue:1146 (details omitted)');
         return false;
       }
 
-      streamConfig = { streamUrl: douyinConfig.streamUrl, streamType: douyinConfig.streamType };
+      streamConfig = douyinConfig;
     } else if (pPlatform === StreamingPlatform.HUYA) {
       streamConfig = await getHuyaStreamConfig(pRoomId, currentQuality.value, effectiveLine);
     } else if (pPlatform === StreamingPlatform.BILIBILI) {
-      streamConfig = await getBilibiliStreamConfig(pRoomId, currentQuality.value, props.cookie || undefined);
-    } else if (pPlatform === StreamingPlatform.CUSTOM_M3U8) {
-      if (!props.streamUrl) {
-        throw new Error('Custom M3U8 URL is missing');
-      }
-      playerIsLive.value = true;
-      streamConfig = {
-        streamUrl: props.streamUrl,
-        streamType: props.streamUrl.includes('.m3u8') ? 'hls' : (props.streamUrl.includes('.flv') ? 'flv' : undefined),
-      };
+      streamConfig = await getBilibiliStreamConfig(pRoomId, currentQuality.value, props.cookie || undefined, effectiveLine);
     } else {
       throw new Error(`涓嶆敮鎸佺殑骞冲彴: ${pPlatform}`);
     }
 
-    if (!isActivePlayerInitRun(initRunId)) {
-      if (pPlatform === StreamingPlatform.DOUYU) {
-        await stopDouyuProxy();
-      }
-      return false;
-    }
+    if (!isActivePlayerInitRun(initRunId)) return false;
 
+    const proxyUrl = await queueStreamProxy(async () => {
+      if (!isActivePlayerInitRun(initRunId)) return null;
+      await invoke('set_stream_url_cmd', {
+        url: streamConfig.streamUrl, headers: streamConfig.headers ?? {}, format: streamConfig.streamType,
+      });
+      if (!isActivePlayerInitRun(initRunId)) return null;
+      return invoke<string>('start_proxy');
+    });
+    if (!proxyUrl || !isActivePlayerInitRun(initRunId)) return false;
+    qualityOptions.value = streamConfig.qualities ?? [];
+    availableLines.value = streamConfig.lines ?? [];
+    currentQuality.value = streamConfig.selectedQuality ?? currentQuality.value;
+    currentLine.value = streamConfig.selectedLine ?? null;
     isLoadingStream.value = false;
-    await mountXgPlayer(streamConfig.streamUrl, pPlatform, pRoomId, streamConfig.streamType, initRunId);
-    if (!isActivePlayerInitRun(initRunId)) {
-      if (pPlatform === StreamingPlatform.DOUYU) {
-        await stopDouyuProxy();
-      }
-      destroyPlayerInstance();
-      return false;
-    }
+    await mountXgPlayer(proxyUrl, pPlatform, pRoomId, streamConfig.streamType, initRunId);
+    if (!isActivePlayerInitRun(initRunId)) return false;
     return true;
   } catch (error: any) {
-    if (!isActivePlayerInitRun(initRunId)) {
-      if (pPlatform === StreamingPlatform.DOUYU) {
-        await stopDouyuProxy();
-      }
-      destroyPlayerInstance();
-      isLoadingStream.value = false;
-      return false;
-    }
-    console.error(`[Player] Error initializing stream for ${pPlatform} room ${pRoomId}:`, error);
+    if (!isActivePlayerInitRun(initRunId)) return false;
+    console.error('Diagnostic: index.vue:1180 (details omitted)');
     destroyPlayerInstance();
 
-    const errorMessage = error?.message || '加载直播流失败，请稍后再试。';
+    const errorMessage = error instanceof Error ? error.message
+      : typeof error === 'string' && error.trim() ? error : '加载直播流失败，请稍后再试。';
 
     if (isOfflineStreamError(errorMessage)) {
       streamError.value = errorMessage;
@@ -1310,7 +1209,7 @@ async function initializePlayerAndStream(
           playerAvatar.value = proxify((res?.avatar ?? props.avatar ?? '') as string);
         }
       } catch (infoError) {
-        console.warn('[Player] Failed to fetch basic streamer info for offline page:', infoError);
+        console.warn('Diagnostic: index.vue:1207 (details omitted)');
       }
     } else {
       streamError.value = errorMessage;
@@ -1356,7 +1255,7 @@ const switchQuality = async (quality: string) => {
   if (!supportsQuality.value) {
     return;
   }
-  if (!qualityOptions.includes(quality as (typeof qualityOptions)[number])) {
+  if (!qualityOptions.value.includes(quality)) {
     return;
   }
   if (!props.roomId || props.platform == null) {
@@ -1379,9 +1278,9 @@ const switchQuality = async (quality: string) => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(`${props.platform}_preferred_quality`, quality);
     }
-    console.log(`[Player] 画质切换完成: ${quality}`);
+    console.log('Diagnostic: index.vue:1276 (details omitted)');
   } catch (error) {
-    console.error('[Player] 画质切换失败:', error);
+    console.error('Diagnostic: index.vue:1278 (details omitted)');
     currentQuality.value = previousQuality;
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(`${props.platform}_preferred_quality`, previousQuality);
@@ -1420,9 +1319,9 @@ const switchLine = async (lineKey: string) => {
       throw new Error(`Failed to reload stream for line ${lineKey}`);
     }
     persistLinePreference(props.platform, lineKey);
-    console.log(`[Player] 线路切换完成: ${lineKey}`);
+    console.log('Diagnostic: index.vue:1317 (details omitted)');
   } catch (error) {
-    console.error('[Player] 线路切换失败:', error);
+    console.error('Diagnostic: index.vue:1319 (details omitted)');
     currentLine.value = previousLine ?? null;
     if (typeof window !== 'undefined' && props.platform) {
       if (previousLine) {
@@ -1532,20 +1431,6 @@ registerPlayerWatchers({
   playerRoot: () => playerInstance.value?.root as HTMLElement | null,
 });
 
-watch(
-  () => [props.roomId, props.platform] as const,
-  (currentRoom, previousRoom) => {
-    if (currentRoom[0] === previousRoom[0] && currentRoom[1] === previousRoom[1]) {
-      return;
-    }
-    setBackgroundAudioEnabled(false);
-    backgroundAudioSource = null;
-  },
-);
-
-watch([playerTitle, playerAnchorName], () => {
-  updateBackgroundAudioSource();
-});
 
 const handleFullscreenPopState = () => {
   if (ignoreNextFullscreenPop) {
@@ -1571,17 +1456,6 @@ if (typeof window !== 'undefined') {
     }
     exitPlayerFullscreenFromSystemBack();
     return true;
-  };
-  dtvWindow.__DTV_PAUSE_WEB_PLAYER__ = () => {
-    playerInstance.value?.mediaPause();
-  };
-  dtvWindow.__DTV_RESUME_WEB_PLAYER__ = () => {
-    const player = playerInstance.value;
-    if (player) {
-      void player.mediaPlay().catch((error: unknown) => {
-        console.warn('[Player] Failed resuming after background audio:', error);
-      });
-    }
   };
 }
 
@@ -1615,18 +1489,12 @@ onUnmounted(async () => {
     window.removeEventListener('popstate', handleFullscreenPopState);
     const dtvWindow = window as DtvWindow;
     delete dtvWindow.__DTV_HANDLE_ANDROID_BACK__;
-    delete dtvWindow.__DTV_PAUSE_WEB_PLAYER__;
-    delete dtvWindow.__DTV_RESUME_WEB_PLAYER__;
   }
-  setBackgroundAudioEnabled(false);
-  backgroundAudioSource = null;
   const platformToStop: StreamingPlatform = props.platform;
   const roomIdToStop: string | null = props.roomId;
+  const proxyCleanup = stopDouyuProxy();
   await stopCurrentDanmakuListener(platformToStop, roomIdToStop);
-
-  if (props.platform === StreamingPlatform.DOUYU) {
-    await stopDouyuProxy();
-  }
+  await proxyCleanup;
 
   destroyPlayerInstance();
   danmakuMessages.value = []; 

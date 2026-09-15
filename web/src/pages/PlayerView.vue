@@ -32,11 +32,11 @@ const handleFollow = (streamerData: Omit<FollowedStreamer, 'platform'>) => {
 
 const handleUnfollow = (platformId: string) => {
   followStore.unfollowStreamer(Platform.DOUYU, platformId);
-  console.log('PlayerView: Unfollowed', platformId);
+  console.log('Diagnostic: PlayerView.vue:35 (details omitted)');
 };
 
 const handleClosePlayer = () => {
-  console.log('PlayerView: Close player event received. Navigating back.');
+  console.log('Diagnostic: PlayerView.vue:39 (details omitted)');
   router.back();
 };
 

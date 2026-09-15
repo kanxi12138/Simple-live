@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import type { FollowedStreamer, Platform } from '../platforms/common/types';
 
-const REMOVED_PLATFORMS = new Set(['KUAISHOU', 'NETEASECC']);
+const REMOVED_PLATFORMS = new Set(['KUAISHOU', 'NETEASECC', 'CUSTOM_M3U8']);
 
 const isRemovedPlatform = (platform: unknown): boolean => {
   return typeof platform === 'string' && REMOVED_PLATFORMS.has(platform);
@@ -121,7 +121,7 @@ export const useFollowStore = defineStore('follow', {
         try {
           this.followedStreamers = sanitizeFollowedStreamers(JSON.parse(storedFollows) as FollowedStreamer[]);
         } catch (e) {
-          console.error('Error parsing followedStreamers from localStorage', e);
+          console.error('Diagnostic: followStore.ts:124 (details omitted)');
           this.followedStreamers = [];
         }
       }
@@ -132,7 +132,7 @@ export const useFollowStore = defineStore('follow', {
         try {
           this.folders = sanitizeFolders(JSON.parse(storedFolders) as FollowFolder[]);
         } catch (e) {
-          console.error('Error parsing followFolders from localStorage', e);
+          console.error('Diagnostic: followStore.ts:135 (details omitted)');
           this.folders = [];
         }
       }
@@ -143,7 +143,7 @@ export const useFollowStore = defineStore('follow', {
         try {
           this.listOrder = sanitizeListOrder(JSON.parse(storedOrder) as FollowListItem[]);
         } catch (e) {
-          console.error('Error parsing followListOrder from localStorage', e);
+          console.error('Diagnostic: followStore.ts:146 (details omitted)');
           this.initializeListOrder();
         }
       } else {
@@ -173,7 +173,7 @@ export const useFollowStore = defineStore('follow', {
       try {
         localStorage.setItem('followedStreamers', JSON.stringify(this.followedStreamers));
       } catch (e) {
-        console.error('Error saving followedStreamers to localStorage', e);
+        console.error('Diagnostic: followStore.ts:176 (details omitted)');
       }
     },
     
@@ -182,7 +182,7 @@ export const useFollowStore = defineStore('follow', {
       try {
         localStorage.setItem('followFolders', JSON.stringify(this.folders));
       } catch (e) {
-        console.error('Error saving followFolders to localStorage', e);
+        console.error('Diagnostic: followStore.ts:185 (details omitted)');
       }
     },
     
@@ -191,7 +191,7 @@ export const useFollowStore = defineStore('follow', {
       try {
         localStorage.setItem('followListOrder', JSON.stringify(this.listOrder));
       } catch (e) {
-        console.error('Error saving followListOrder to localStorage', e);
+        console.error('Diagnostic: followStore.ts:194 (details omitted)');
       }
     },
     followStreamer(streamer: FollowedStreamer) {
@@ -297,7 +297,7 @@ export const useFollowStore = defineStore('follow', {
       // 验证新名称
       const trimmedName = newName.trim();
       if (!trimmedName) {
-        console.warn('Folder name cannot be empty');
+        console.warn('Diagnostic: followStore.ts:300 (details omitted)');
         return;
       }
       

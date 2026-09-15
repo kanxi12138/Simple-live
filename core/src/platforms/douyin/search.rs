@@ -1,3 +1,4 @@
+use crate::platforms::common::request_limit::LimitedRequest;
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -24,6 +25,10 @@ pub struct DouyinSearchLiveItem {
     pub is_live: bool,
     pub status: i32,
     pub total_user_str: String,
+    pub account_id: Option<String>,
+    pub sec_uid: Option<String>,
+    pub douyin_id: Option<String>,
+    pub follower_count: Option<u64>,
 }
 
 fn build_search_cookie_from_response(response: &reqwest::Response) -> BTreeMap<String, String> {
@@ -62,10 +67,20 @@ fn fallback_webid() -> String {
     format!("738{}{}", millis, millis % 10)
 }
 
-async fn bootstrap_search_context(
+pub(super) async fn bootstrap_search_context(
     client: &HttpClient,
     keyword: &str,
+    user_cookie: Option<&str>,
 ) -> Result<(String, String), String> {
+    if let Some(cookie) = user_cookie.filter(|value| !value.trim().is_empty()) {
+        reqwest::header::HeaderValue::from_str(cookie)
+            .map_err(|_| "抖音登录信息格式无效，请重新登录".to_string())?;
+        let cookie_map = build_cookie_map_from_header(cookie);
+        let webid = cookie_map.get("webid").filter(|value| {
+            !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+        }).cloned().unwrap_or_else(fallback_webid);
+        return Ok((cookie.to_string(), webid));
+    }
     let referer = format!("{}{}?type=live", DOUYIN_SEARCH_REFERER_BASE, urlencoding::encode(keyword));
     let response = client
         .inner
@@ -73,12 +88,13 @@ async fn bootstrap_search_context(
         .header(USER_AGENT, DEFAULT_USER_AGENT)
         .header(ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
         .header(ACCEPT_LANGUAGE, "zh-CN,zh;q=0.9,en;q=0.8")
-        .send()
+        .send_limited()
         .await
         .map_err(|e| format!("Failed to bootstrap Douyin search cookies: {}", e))?;
 
     let response_cookie_map = build_search_cookie_from_response(&response);
-    let mut cookie_map = build_cookie_map_from_header(super::web_api::DEFAULT_COOKIE);
+    let runtime_cookie = super::room_page::runtime_cookie(&client.inner, "").await.map_err(|error| error.to_string())?;
+    let mut cookie_map = build_cookie_map_from_header(&runtime_cookie);
     cookie_map.extend(response_cookie_map);
     let cookie_header = cookie_map
         .iter()
@@ -89,7 +105,7 @@ async fn bootstrap_search_context(
     let webid = cookie_map
         .get("s_v_web_id")
         .cloned()
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
         .unwrap_or_else(fallback_webid);
 
     Ok((cookie_header, webid))
@@ -135,6 +151,12 @@ fn parse_search_item(item: &Value) -> Option<DouyinSearchLiveItem> {
         avatar,
         is_live: status == 2,
         status,
+        account_id: super::account_search::identifier(owner.get("id_str"))
+            .or_else(|| super::account_search::identifier(owner.get("id"))),
+        sec_uid: super::account_search::identifier(owner.get("sec_uid")),
+        douyin_id: super::account_search::identifier(owner.get("unique_id"))
+            .or_else(|| super::account_search::identifier(owner.get("short_id"))),
+        follower_count: super::account_search::follower_count(owner),
         total_user_str: parsed
             .get("stats")
             .and_then(|v| v.get("total_user_str"))
@@ -148,6 +170,7 @@ fn parse_search_item(item: &Value) -> Option<DouyinSearchLiveItem> {
 pub async fn search_douyin_live_rooms(
     keyword: String,
     page: u32,
+    cookie: Option<String>,
     _follow_http: tauri::State<'_, FollowHttpClient>,
 ) -> Result<Vec<DouyinSearchLiveItem>, String> {
     let trimmed_keyword = keyword.trim();
@@ -157,7 +180,7 @@ pub async fn search_douyin_live_rooms(
 
     let client = HttpClient::new_direct_connection()
         .map_err(|e| format!("Failed to create Douyin search client: {}", e))?;
-    let (cookie_header, webid) = bootstrap_search_context(&client, trimmed_keyword).await?;
+    let (cookie_header, webid) = bootstrap_search_context(&client, trimmed_keyword, cookie.as_deref()).await?;
 
     let offset = page.saturating_sub(1) * 10;
     let offset_string = offset.to_string();
@@ -214,9 +237,11 @@ pub async fn search_douyin_live_rooms(
         .header(USER_AGENT, DEFAULT_USER_AGENT);
 
     let response_text = request
-        .send()
+        .send_limited()
         .await
         .map_err(|e| format!("Douyin live search request failed: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("抖音搜索请求失败: {e}"))?
         .text()
         .await
         .map_err(|e| format!("Failed to read Douyin live search response: {}", e))?;
@@ -228,11 +253,16 @@ pub async fn search_douyin_live_rooms(
     let payload: Value = serde_json::from_str(&response_text)
         .map_err(|e| format!("Failed to parse Douyin live search response: {}", e))?;
 
+    if let Some(code) = payload.get("status_code").and_then(Value::as_i64).filter(|code| *code != 0) {
+        let message = payload.get("status_msg").and_then(Value::as_str).filter(|value| !value.is_empty())
+            .unwrap_or("平台拒绝了搜索请求");
+        return Err(format!("抖音搜索失败（{code}）：{message}"));
+    }
     let items = payload
         .get("data")
         .and_then(|v| v.as_array())
-        .map(|entries| entries.iter().filter_map(parse_search_item).collect())
-        .unwrap_or_else(Vec::new);
+        .ok_or("抖音搜索响应缺少结果列表，可能受到平台限制")?
+        .iter().filter_map(parse_search_item).collect();
 
     Ok(items)
 }

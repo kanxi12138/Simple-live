@@ -9,9 +9,11 @@
       </slot>
     </div>
     <img
-      v-show="isLoaded"
+      :key="src"
       :src="src"
       :alt="alt"
+      :loading="loading || 'eager'"
+      decoding="async"
       :class="['smooth-img', imgClass, { 'fade-in': isLoaded }]"
       @load="handleLoad"
       @error="handleError"
@@ -26,17 +28,21 @@ const props = defineProps<{
   src: string;
   alt?: string;
   imgClass?: string;
+  loading?: 'eager' | 'lazy';
 }>();
 
 const isLoaded = ref(false);
 const isError = ref(false);
 
-const handleLoad = () => {
+const handleLoad = (event: Event) => {
+  // Ignore events from an image replaced while its request was still pending.
+  if ((event.currentTarget as HTMLImageElement).getAttribute('src') !== props.src) return;
   isLoaded.value = true;
   isError.value = false;
 };
 
-const handleError = () => {
+const handleError = (event: Event) => {
+  if ((event.currentTarget as HTMLImageElement).getAttribute('src') !== props.src) return;
   isLoaded.value = false;
   isError.value = true;
 };
@@ -55,7 +61,7 @@ watch(() => props.src, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--skeleton-bg);
+  background-color: var(--bg-tertiary);
   /* Do not set fixed width/height here, let the class from parent decide */
 }
 
@@ -66,17 +72,13 @@ watch(() => props.src, () => {
   width: 100%;
   height: 100%;
   z-index: 1;
-  animation: shimmer 1.4s ease-in-out infinite;
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.04) 25%,
-    rgba(255, 255, 255, 0.12) 37%,
-    rgba(255, 255, 255, 0.04) 63%
-  );
-  background-size: 400% 100%;
+  background: var(--bg-tertiary);
 }
 
 .image-error-placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -103,8 +105,9 @@ watch(() => props.src, () => {
   opacity: 0.5;
 }
 
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+@media (prefers-reduced-motion: reduce) {
+  .smooth-img {
+    transition: none;
+  }
 }
 </style>

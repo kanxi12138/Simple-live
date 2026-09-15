@@ -8,7 +8,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
 const WS_URL: &str = "wss://cdnws.api.huya.com";
 // 恢复 HEARTBEAT 常量（被误删），供心跳发送使用
-const HEARTBEAT: &'static [u8] = b"\x00\x03\x1d\x00\x00\x69\x00\x00\x00\x69\x10\x03\x2c\x3c\x4c\x56\x08\x6f\x6e\x6c\x69\x6e\x65\x75\x69\x66\x0f\x4f\x6e\x55\x73\x65\x72\x48\x65\x61\x72\x74\x42\x65\x61\x74\x7d\x00\x00\x3c\x08\x00\x01\x06\x04\x74\x52\x65\x71\x1d\x00\x00\x2f\x0a\x0a\x0c\x16\x00\x26\x00\x36\x07\x61\x64\x72\x5f\x77\x61\x70\x46\x00\x0b\x12\x03\xae\xf0\x0f\x22\x03\xae\xf0\x0f\x3c\x42\x6d\x52\x02\x60\x5c\x60\x01\x7c\x82\x00\x0b\xb0\x1f\x9c\xac\x0b\x8c\x98\x0c\xa8\x0c";
+const HEARTBEAT: &[u8] = &[0, 20, 29, 0, 12, 44, 54, 0, 76];
 // const HEARTBEAT_BASE64: &str = "ABQdAAwsNgBM"; // same as Python
 #[allow(dead_code)]
 const HEARTBEAT_BASE64: &str = "ABQdAAwsNgBM"; // same as Python
@@ -19,76 +19,29 @@ enum ConnectionOutcome {
     Disconnected,
 }
 
-async fn fetch_huya_ids(room_id: &str) -> Result<(i64, i64), String> {
-    let url = format!(
-        "https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={}&showSecret=1",
-        room_id
-    );
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(url)
-        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36")
-        .header("Accept", "*/*")
-        .header("Origin", "https://www.huya.com")
-        .header("Referer", "https://www.huya.com/")
-        .send().await.map_err(|e| e.to_string())?;
-    let text = resp.text().await.map_err(|e| e.to_string())?;
-    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-
-    let status = v.get("status").and_then(|x| x.as_i64()).unwrap_or(0);
-    if status != 200 {
-        return Err("房间未开播或无流信息，无法获取弹幕参数".to_string());
-    }
-
-    let data = v.get("data").ok_or_else(|| "缺少data".to_string())?;
-    let ayyuid = data
-        .get("profileInfo")
-        .and_then(|x| x.get("yyid"))
-        .and_then(|x| x.as_i64())
-        .unwrap_or(0);
-
-    let base_list = data
-        .get("stream")
-        .and_then(|x| x.get("baseSteamInfoList"))
-        .and_then(|x| x.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    let top_sid = if let Some(first) = base_list.get(0) {
-        first
-            .get("lChannelId")
-            .and_then(|x| x.as_i64())
-            .unwrap_or(0)
-    } else {
-        0
-    };
-
-    if top_sid == 0 {
-        return Err("未找到频道ID，房间可能未开播".to_string());
-    }
-
-    println!(
-        "[Huya Danmaku] fetch_huya_ids: room_id={} yyid={} topSid={}",
-        room_id, ayyuid, top_sid
-    );
-    Ok((ayyuid, top_sid))
+async fn fetch_huya_ids(room_id: &str) -> Result<(i64, i64, i64), String> {
+    let client = reqwest::Client::builder().redirect(crate::network_policy::redirects()).no_proxy().build().map_err(|error| error.to_string())?;
+    let page = super::stream_url::fetch_room_page(&client, room_id).await.map_err(|error| error.to_string())?;
+    let yyid = page.data.pointer("/roomInfo/tLiveInfo/lYyid").and_then(serde_json::Value::as_i64)
+        .ok_or("虎牙页面缺少弹幕用户标识")?;
+    if yyid == 0 || page.top_sid == 0 { return Err("虎牙未返回有效的弹幕频道".to_string()); }
+    Ok((yyid, page.top_sid, page.sub_sid))
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct HuyaJoinParams {
     pub yyid: i64,
     pub top_sid: i64,
+    pub sub_sid: i64,
 }
 
 #[tauri::command]
 pub async fn fetch_huya_join_params(room_id: String) -> Result<HuyaJoinParams, String> {
     match fetch_huya_ids(&room_id).await {
-        Ok((ayyuid, top_sid)) => Ok(HuyaJoinParams {
+        Ok((ayyuid, top_sid, sub_sid)) => Ok(HuyaJoinParams {
             yyid: ayyuid,
             top_sid,
+            sub_sid,
         }),
         Err(e) => Err(e),
     }
@@ -101,14 +54,8 @@ pub async fn start_huya_danmaku_listener(
     state: tauri::State<'_, crate::platforms::common::HuyaDanmakuState>,
 ) -> Result<(), String> {
     let room_id_or_url = payload.args.room_id_str.clone();
-    println!(
-        "[Huya Danmaku] start listener room_id_or_url={}",
-        room_id_or_url
-    );
-    info!(
-        "[Huya Danmaku] start listener room_id_or_url={}",
-        room_id_or_url
-    );
+    println!("Diagnostic: danmaku.rs:57 (details omitted)");
+    info!("Diagnostic: danmaku.rs:61 (details omitted)");
 
     // 停止已有监听
     let previous_tx = {
@@ -117,7 +64,7 @@ pub async fn start_huya_danmaku_listener(
     };
     if let Some(tx) = previous_tx {
         if tx.send(()).await.is_err() {
-            eprintln!("[Huya Danmaku] 旧任务关闭失败，可能已退出。");
+            eprintln!("Diagnostic: danmaku.rs:73 (details omitted)");
         }
     }
 
@@ -132,48 +79,38 @@ pub async fn start_huya_danmaku_listener(
     let room_id_clone = room_id_or_url.clone();
 
     tokio::spawn(async move {
-        println!(
-            "[Huya Danmaku] spawned worker for room_id={}",
-            room_id_clone
-        );
-        info!(
-            "[Huya Danmaku] spawned worker for room_id={}",
-            room_id_clone
-        );
+        println!("Diagnostic: danmaku.rs:88 (details omitted)");
+        info!("Diagnostic: danmaku.rs:92 (details omitted)");
 
         let mut backoff_secs = 1u64;
 
-        loop {
+        for _attempt in 0..3 {
             let result: anyhow::Result<ConnectionOutcome> = async {
-                let (ws_url, reg_data) = get_ws_info_tars(&room_id_clone)
-                    .await
-                    .map_err(|e| anyhow::anyhow!(e))?;
+                let (ws_url, reg_data) = tokio::select! {
+                    _ = rx_shutdown.recv() => return Ok(ConnectionOutcome::Stop),
+                    result = get_ws_info_tars(&room_id_clone) => result.map_err(anyhow::Error::msg)?,
+                };
 
-                println!(
-                    "[Huya Danmaku] ws_url={} reg_len={}",
-                    ws_url,
-                    reg_data.len()
-                );
-                info!(
-                    "[Huya Danmaku] ws_url={} reg_len={}",
-                    ws_url,
-                    reg_data.len()
-                );
+                println!("Diagnostic: danmaku.rs:106 (details omitted)");
+                info!("Diagnostic: danmaku.rs:111 (details omitted)");
 
-                println!("[Huya Danmaku] connecting to {}", ws_url);
-                info!("[Huya Danmaku] connecting to {}", ws_url);
-                let (ws_stream, _) = connect_async(&ws_url).await?;
+                println!("Diagnostic: danmaku.rs:117 (details omitted)");
+                info!("Diagnostic: danmaku.rs:118 (details omitted)");
+                let (ws_stream, _) = tokio::select! {
+                    _ = rx_shutdown.recv() => return Ok(ConnectionOutcome::Stop),
+                    result = connect_async(&ws_url) => result?,
+                };
 
                 let (mut ws_write, mut ws_read) = ws_stream.split();
                 ws_write.send(WsMessage::Binary(reg_data)).await?;
 
                 let hb_task = async {
-                    let mut hb_seq = 0usize;
+
                     while let Ok(_) = ws_write.send(WsMessage::Binary(HEARTBEAT.into())).await {
-                        hb_seq += 1;
-                        println!("[Huya Danmaku] heartbeat sent #{}", hb_seq);
-                        info!("[Huya Danmaku] heartbeat sent #{}", hb_seq);
-                        sleep(Duration::from_secs(20)).await;
+
+                        println!("Diagnostic: danmaku.rs:131 (details omitted)");
+                        info!("Diagnostic: danmaku.rs:132 (details omitted)");
+                        sleep(Duration::from_secs(60)).await;
                     }
                     Err::<(), anyhow::Error>(anyhow::anyhow!("Huya heartbeat send failed"))
                 };
@@ -186,23 +123,13 @@ pub async fn start_huya_danmaku_listener(
                         };
                         match m {
                             WsMessage::Binary(bin) => {
-                                let (top_cmd, nested_cmd) = peek_cmds(&bin);
-                                println!(
-                                    "[Huya Danmaku] WS msg: len={} top_cmd={:?} nested_cmd={:?}",
-                                    bin.len(),
-                                    top_cmd,
-                                    nested_cmd
-                                );
-                                info!(
-                                    "[Huya Danmaku] WS msg: len={} top_cmd={:?} nested_cmd={:?}",
-                                    bin.len(),
-                                    top_cmd,
-                                    nested_cmd
-                                );
+                                let (top_cmd, _nested_cmd) = peek_cmds(&bin);
+                                println!("Diagnostic: danmaku.rs:147 (details omitted)");
+                                info!("Diagnostic: danmaku.rs:153 (details omitted)");
                                 match decode_msg_tars(&bin)? {
                                     Some((nick, text)) => {
-                                        println!("[Huya Danmaku] decoded chat: {} -> {}", nick, text);
-                                        info!("[Huya Danmaku] decoded chat: {} -> {}", nick, text);
+                                        println!("Diagnostic: danmaku.rs:161 (details omitted)");
+                                        info!("Diagnostic: danmaku.rs:162 (details omitted)");
                                         let _ = app_handle_clone.emit(
                                             "danmaku-message",
                                             crate::platforms::common::DanmakuFrontendPayload {
@@ -216,21 +143,15 @@ pub async fn start_huya_danmaku_listener(
                                     }
                                     None => {
                                         if top_cmd == Some(7) {
-                                            println!(
-                                                "[Huya Danmaku] non-chat or empty msg, nested={:?}",
-                                                nested_cmd
-                                            );
-                                            info!(
-                                                "[Huya Danmaku] non-chat or empty msg, nested={:?}",
-                                                nested_cmd
-                                            );
+                                            println!("Diagnostic: danmaku.rs:176 (details omitted)");
+                                            info!("Diagnostic: danmaku.rs:180 (details omitted)");
                                         }
                                     }
                                 }
                             }
-                            other => {
-                                println!("[Huya Danmaku] non-binary ws message: {:?}", other);
-                                info!("[Huya Danmaku] non-binary ws message: {:?}", other);
+                            _other => {
+                                println!("Diagnostic: danmaku.rs:189 (details omitted)");
+                                info!("Diagnostic: danmaku.rs:190 (details omitted)");
                             }
                         }
                     }
@@ -240,11 +161,11 @@ pub async fn start_huya_danmaku_listener(
                 tokio::select! {
                     _ = rx_shutdown.recv() => Ok(ConnectionOutcome::Stop),
                     it = hb_task => {
-                        if let Err(e) = it { eprintln!("[Huya Danmaku] {}", e); }
+                        if let Err(_) = it { eprintln!("Diagnostic: danmaku.rs:200 (details omitted)"); }
                         Ok(ConnectionOutcome::Disconnected)
                     }
                     it = recv_task => {
-                        if let Err(e) = it { eprintln!("[Huya Danmaku] recv error: {}", e); }
+                        if let Err(_) = it { eprintln!("Diagnostic: danmaku.rs:204 (details omitted)"); }
                         Ok(ConnectionOutcome::Disconnected)
                     }
                 }
@@ -254,16 +175,17 @@ pub async fn start_huya_danmaku_listener(
             match result {
                 Ok(ConnectionOutcome::Stop) => break,
                 Ok(ConnectionOutcome::Disconnected) => {
-                    eprintln!(
-                        "[Huya Danmaku] Disconnected, retrying in {}s.",
-                        backoff_secs
-                    );
+                    if let Err(_emit_error) = app_handle_clone.emit("danmaku-status", serde_json::json!({
+                        "room_id": room_id_clone, "platform": "huya", "status": "error", "message": "弹幕连接断开，正在重连"
+                    })) { log::error!("Diagnostic: danmaku.rs:216 (details omitted)"); }
+                    eprintln!("Diagnostic: danmaku.rs:217 (details omitted)");
                 }
-                Err(e) => {
-                    eprintln!(
-                        "[Huya Danmaku] Connection error: {}. Retrying in {}s.",
-                        e, backoff_secs
-                    );
+                Err(_error) => {
+                    if let Err(_emit_error) = app_handle_clone.emit("danmaku-status", serde_json::json!({
+                        "room_id": room_id_clone, "platform": "huya", "status": "error", "message": "平台弹幕暂不可用，请手动重试"
+                    })) { log::error!("Diagnostic: danmaku.rs:225 (details omitted)"); }
+                    eprintln!("Diagnostic: danmaku.rs:226 (details omitted)");
+                    break;
                 }
             }
 
@@ -284,10 +206,8 @@ pub async fn stop_huya_danmaku_listener(
     room_id: String,
     state: tauri::State<'_, crate::platforms::common::HuyaDanmakuState>,
 ) -> Result<(), String> {
-    println!(
-        "[Huya Danmaku] stop_huya_danmaku_listener called for room_id={}",
-        room_id
-    );
+    let _ = room_id; // Retained IPC argument for existing clients.
+    println!("Diagnostic: danmaku.rs:250 (details omitted)");
 
     // 取出当前监听的停止信号发送器
     let tx = {
@@ -297,12 +217,12 @@ pub async fn stop_huya_danmaku_listener(
 
     if let Some(tx) = tx {
         if let Err(_) = tx.send(()).await {
-            println!("[Huya Danmaku] 停止信号发送失败，监听器可能已经退出");
+            println!("Diagnostic: danmaku.rs:263 (details omitted)");
         } else {
-            println!("[Huya Danmaku] 停止信号已发送给 room_id={}", room_id);
+            println!("Diagnostic: danmaku.rs:265 (details omitted)");
         }
     } else {
-        println!("[Huya Danmaku] 没有找到活跃的监听器需要停止");
+        println!("Diagnostic: danmaku.rs:268 (details omitted)");
     }
 
     Ok(())
@@ -356,159 +276,25 @@ fn peek_cmds(data: &[u8]) -> (Option<i32>, Option<i64>) {
     (top_cmd, nested_cmd)
 }
 
-fn find_uid_in_json(v: &serde_json::Value) -> Option<String> {
-    match v {
-        serde_json::Value::Object(map) => {
-            for (k, val) in map {
-                let key = k.to_lowercase();
-                if key == "ayyuid" || key == "yyuid" || key == "lp" || key == "uid" {
-                    match val {
-                        serde_json::Value::String(s) => {
-                            if !s.is_empty() {
-                                return Some(s.clone());
-                            }
-                        }
-                        serde_json::Value::Number(n) => return Some(n.to_string()),
-                        _ => {}
-                    }
-                }
-                if let Some(found) = find_uid_in_json(val) {
-                    return Some(found);
-                }
-            }
-            None
-        }
-        serde_json::Value::Array(arr) => {
-            for item in arr {
-                if let Some(found) = find_uid_in_json(item) {
-                    return Some(found);
-                }
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
-fn gen_ua() -> String {
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".to_string()
-}
-
-async fn get_ws_info_tars(room_id_or_url: &str) -> Result<(String, Vec<u8>), String> {
-    let url = if room_id_or_url.starts_with("http") {
-        reqwest::Url::parse(room_id_or_url).map_err(|e| e.to_string())?
-    } else {
-        reqwest::Url::parse(&format!("https://www.huya.com/{}", room_id_or_url))
-            .map_err(|e| e.to_string())?
+// Ported from dart_simple_live ba828e6 huya_danmaku.dart (GPL-3.0).
+async fn get_ws_info_tars(room_id: &str) -> Result<(String, Vec<u8>), String> {
+    let (yyid, top_sid, sub_sid) = fetch_huya_ids(room_id).await?;
+    let encode = || -> Result<Vec<u8>, EncodeErr> {
+        let mut registration = TarsEncoder::new();
+        registration.write_int64(0, yyid)?;
+        registration.write_boolean(1, true)?;
+        registration.write_string(2, &String::new())?;
+        registration.write_string(3, &String::new())?;
+        registration.write_int64(4, top_sid)?;
+        registration.write_int64(5, sub_sid)?;
+        registration.write_int32(6, 0)?;
+        registration.write_int32(7, 0)?;
+        let mut command = TarsEncoder::new();
+        command.write_int32(0, 1)?;
+        command.write_bytes(1, &registration.to_bytes())?;
+        Ok(command.to_bytes().to_vec())
     };
-    let rid = url
-        .path_segments()
-        .and_then(|s| s.last())
-        .ok_or_else(|| "房间ID解析失败".to_string())?;
-    println!("[Huya Danmaku] get_ws_info_tars rid={}", rid);
-    info!("[Huya Danmaku] get_ws_info_tars rid={}", rid);
-
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp_text = client
-        .get(format!("https://www.huya.com/{}", rid))
-        .header("User-Agent", gen_ua())
-        .header("Referer", "https://www.huya.com/")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .text()
-        .await
-        .map_err(|e| e.to_string())?;
-    println!("[Huya Danmaku] fetched room page len={}", resp_text.len());
-    info!("[Huya Danmaku] fetched room page len={}", resp_text.len());
-
-    // 先尝试 TT_PROFILE_INFO 提取 lp
-    let mut ayyuid = {
-        let re_prof = regex::Regex::new(r#"var\s+TT_PROFILE_INFO\s*=\s*(\{[\s\S]*?\});"#)
-            .map_err(|e| e.to_string())?;
-        if let Some(cap) = re_prof.captures(&resp_text) {
-            if let Ok(j) = serde_json::from_str::<serde_json::Value>(&cap[1]) {
-                j.pointer("/lp")
-                    .map(|v| v.to_string().replace('"', ""))
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        }
-    };
-    if ayyuid.is_empty() {
-        // 直接匹配 lp
-        let re_lp =
-            regex::Regex::new(r#"\\\"lp\\\"\s*:\s*\\\"?(\d+)\\\"?"#).map_err(|e| e.to_string())?;
-        if let Some(cap) = re_lp.captures(&resp_text) {
-            ayyuid = cap.get(1).unwrap().as_str().to_string();
-        }
-    }
-    if ayyuid.is_empty() {
-        // 匹配 ayyuid / yyuid
-        let re_ayyuid = regex::Regex::new(r#"\\\"ayyuid\\\"\s*:\s*\\\"?(\d+)\\\"?"#)
-            .map_err(|e| e.to_string())?;
-        let re_yyuid = regex::Regex::new(r#"\\\"yyuid\\\"\s*:\s*\\\"?(\d+)\\\"?"#)
-            .map_err(|e| e.to_string())?;
-        if let Some(cap) = re_ayyuid.captures(&resp_text) {
-            ayyuid = cap.get(1).unwrap().as_str().to_string();
-        } else if let Some(cap) = re_yyuid.captures(&resp_text) {
-            ayyuid = cap.get(1).unwrap().as_str().to_string();
-        }
-    }
-    if ayyuid.is_empty() {
-        // 回退：调用 mp.huya.com
-        let url_api = format!(
-            "https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={}",
-            rid
-        );
-        let text = client
-            .get(&url_api)
-            .header("User-Agent", gen_ua())
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .text()
-            .await
-            .map_err(|e| e.to_string())?;
-        if let Ok(j) = serde_json::from_str::<serde_json::Value>(&text) {
-            if let Some(found) = find_uid_in_json(&j) {
-                ayyuid = found;
-            }
-        }
-    }
-    if ayyuid.is_empty() {
-        ayyuid = rid.to_string();
-    }
-    println!("[Huya Danmaku] final ayyuid={}", ayyuid);
-    info!("[Huya Danmaku] final ayyuid={}", ayyuid);
-
-    let mut topics = Vec::new();
-    topics.push(format!("live:{}", ayyuid));
-    topics.push(format!("chat:{}", ayyuid));
-    println!("[Huya Danmaku] topics={:?}", topics);
-    info!("[Huya Danmaku] topics={:?}", topics);
-
-    let mut oos = TarsEncoder::new();
-    oos.write_list(0, &topics).map_err(|e| e.to_string())?;
-    oos.write_string(1, &"".to_owned())
-        .map_err(|e| e.to_string())?;
-
-    let mut wscmd = TarsEncoder::new();
-    wscmd.write_int32(0, 16).map_err(|e| e.to_string())?;
-    wscmd
-        .write_bytes(1, &oos.to_bytes())
-        .map_err(|e| e.to_string())?;
-    let b = wscmd.to_bytes();
-    println!("[Huya Danmaku] reg payload built, len={}", b.len());
-    info!("[Huya Danmaku] reg payload built, len={}", b.len());
-
-    Ok((WS_URL.to_owned(), b.as_ref().to_vec()))
+    Ok((WS_URL.to_string(), encode().map_err(|error| error.to_string())?))
 }
 
 fn decode_msg_tars(data: &[u8]) -> anyhow::Result<Option<(String, String)>> {
@@ -516,16 +302,16 @@ fn decode_msg_tars(data: &[u8]) -> anyhow::Result<Option<(String, String)>> {
     let mut ios = TarsDecoder::from(data);
     let top = ios.read_int32(0, false, -1)?;
     if top != 7 {
-        println!("[Huya Danmaku] ignore msg: top_cmd={}", top);
-        info!("[Huya Danmaku] ignore msg: top_cmd={}", top);
+        println!("Diagnostic: danmaku.rs:348 (details omitted)");
+        info!("Diagnostic: danmaku.rs:349 (details omitted)");
         return Ok(ret);
     }
     let b1 = ios.read_bytes(1, false, Default::default())?;
     let mut inner = TarsDecoder::from(b1.as_ref());
     let nested = inner.read_int32(1, false, -1).unwrap_or(-1);
     let b2 = inner.read_bytes(2, false, Default::default())?;
-    println!("[Huya Danmaku] nested={} payload_len={}", nested, b2.len());
-    info!("[Huya Danmaku] nested={} payload_len={}", nested, b2.len());
+    println!("Diagnostic: danmaku.rs:356 (details omitted)");
+    info!("Diagnostic: danmaku.rs:357 (details omitted)");
     let mut payload = TarsDecoder::from(b2.as_ref());
 
     if nested == 1400 {
@@ -559,22 +345,16 @@ fn decode_msg_tars(data: &[u8]) -> anyhow::Result<Option<(String, String)>> {
                 "匿名".to_string()
             };
             let _color_hex = format!("{:06x}", if fmt.color <= 0 { 16777215 } else { fmt.color });
-            println!(
-                "[Huya Danmaku] decoded nested=1400 nick={} text={}",
-                nick, text
-            );
-            info!(
-                "[Huya Danmaku] decoded nested=1400 nick={} text={}",
-                nick, text
-            );
+            println!("Diagnostic: danmaku.rs:391 (details omitted)");
+            info!("Diagnostic: danmaku.rs:395 (details omitted)");
             ret = Some((nick, text));
         } else {
-            println!("[Huya Danmaku] empty text in nested=1400");
-            info!("[Huya Danmaku] empty text in nested=1400");
+            println!("Diagnostic: danmaku.rs:401 (details omitted)");
+            info!("Diagnostic: danmaku.rs:402 (details omitted)");
         }
     } else {
-        println!("[Huya Danmaku] non-chat nested={}, skip", nested);
-        info!("[Huya Danmaku] non-chat nested={}, skip", nested);
+        println!("Diagnostic: danmaku.rs:405 (details omitted)");
+        info!("Diagnostic: danmaku.rs:406 (details omitted)");
     }
     Ok(ret)
 }

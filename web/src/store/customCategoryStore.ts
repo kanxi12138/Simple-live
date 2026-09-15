@@ -199,7 +199,7 @@ export const useCustomCategoryStore = defineStore('customCategories', {
         }
         this.persist();
       } catch (err) {
-        console.warn('[CustomCategoryStore] Failed to load categories:', err);
+        console.warn('Diagnostic: customCategoryStore.ts:202 (details omitted)');
       } finally {
         this.loaded = true;
       }
@@ -209,7 +209,7 @@ export const useCustomCategoryStore = defineStore('customCategories', {
       try {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.entries));
       } catch (err) {
-        console.warn('[CustomCategoryStore] Failed to save categories:', err);
+        console.warn('Diagnostic: customCategoryStore.ts:212 (details omitted)');
       }
     },
     isKeySubscribed(key: string) {

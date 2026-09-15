@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../services/platformInvoke';
 import type { StreamerDetails, LiveStatus } from '../common/types'; // Import LiveStatus
 
 interface DouyuRoomInfoFromCommand {
@@ -16,7 +16,7 @@ export async function fetchDouyuStreamerDetails(roomId: string): Promise<Streame
     const roomData = await invoke<DouyuRoomInfoFromCommand>('fetch_douyu_room_info', { roomId });
 
     if (!roomData) { // Should not happen if invoke succeeds and Rust returns Ok
-      console.error('[StreamerInfo/douyuParser.ts] Received null/undefined roomData from invoke for Douyu room:', roomId);
+      console.error('Diagnostic: streamerInfoParser.ts:19 (details omitted)');
       throw new Error('Failed to retrieve valid room data from backend for Douyu.');
     }
     
@@ -50,7 +50,7 @@ export async function fetchDouyuStreamerDetails(roomId: string): Promise<Streame
       categoryName: undefined, // Placeholder - needs data source
     };
   } catch (e: any) {
-    console.error(`[StreamerInfo/douyuParser.ts] Error fetching or parsing Douyu details for ${roomId}:`, e);
+    console.error('Diagnostic: streamerInfoParser.ts:53 (details omitted)');
     // Return a StreamerDetails object with an error message and offline status
     return {
       roomId: roomId,

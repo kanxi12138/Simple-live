@@ -1,3 +1,4 @@
+use crate::platforms::common::request_limit::LimitedRequest;
 use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
@@ -49,7 +50,7 @@ pub async fn fetch_douyu_room_info(
         .inner
         .get(format!("https://www.douyu.com/betard/{room_id}"))
         .headers(headers)
-        .send()
+        .send_limited()
         .await
         .map_err(|error| format!("Network request failed for room {room_id}: {error}"))?
         .text()
@@ -116,7 +117,7 @@ async fn resolve_room_id_from_mobile_page(
         .get(&mobile_url)
         .header("Referer", &mobile_url)
         .header("User-Agent", DOUYU_USER_AGENT)
-        .send()
+        .send_limited()
         .await
         .map_err(|error| format!("Failed loading Douyu mobile page for {room_id}: {error}"))?
         .text()
