@@ -5,7 +5,7 @@
         <div class="sheet-header">
           <div>
             <strong>关注列表</strong>
-            <p>长按排序、分组与快速跳转都保留。</p>
+            <p>点击进入直播间，长按调整关注顺序。</p>
           </div>
           <button type="button" class="close-btn" @click="emit('close')">关闭</button>
         </div>
@@ -78,7 +78,7 @@ const emit = defineEmits<{
 
 .sheet-header p {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--mobile-text-secondary);
 }
 
@@ -116,5 +116,34 @@ const emit = defineEmits<{
 .sheet-fade-enter-from .sheet,
 .sheet-fade-leave-to .sheet {
   transform: translateY(18px);
+}
+
+.close-btn:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+button:active:not(:disabled) {
+  background-color: var(--mobile-pill-active-bg);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sheet-header strong {
+  line-height: 1.4;
+}
+
+.sheet-header p {
+  line-height: 1.6;
 }
 </style>

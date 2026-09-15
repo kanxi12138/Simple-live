@@ -50,7 +50,7 @@ export const useCategoryStore = defineStore('category', {
             this.setCurrentCategory(cat.type, cat.id, cat.name || '');
           }
         } catch (e) {
-          console.error('Error parsing currentCategory from localStorage', e);
+          console.error('Diagnostic: categoryStore.ts:53 (details omitted)');
         }
       }
     }

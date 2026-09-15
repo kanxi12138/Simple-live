@@ -1,5 +1,7 @@
+use crate::platforms::common::request_limit::LimitedRequest;
 use reqwest::header::{HeaderMap as ReqwestHeaderMap, HeaderName, HeaderValue, USER_AGENT};
-use reqwest::{cookie::Jar, Client, RequestBuilder, Response};
+use super::request_limit::PlatformResponse as Response;
+use reqwest::{cookie::Jar, Client, RequestBuilder};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,7 +28,7 @@ impl HttpClient {
 
         let cookie_jar = Arc::new(Jar::default());
 
-        let client_builder = Client::builder()
+        let client_builder = Client::builder().redirect(crate::network_policy::redirects())
             .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECONDS))
             .cookie_provider(cookie_jar);
 
@@ -52,7 +54,7 @@ impl HttpClient {
 
         let cookie_jar = Arc::new(Jar::default());
 
-        let client_builder = Client::builder()
+        let client_builder = Client::builder().redirect(crate::network_policy::redirects())
             .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECONDS))
             .cookie_provider(cookie_jar)
             .no_proxy(); // 关键：禁用所有代理设置
@@ -78,7 +80,7 @@ impl HttpClient {
 
         let cookie_jar = Arc::new(Jar::default());
 
-        let client_builder = Client::builder()
+        let client_builder = Client::builder().redirect(crate::network_policy::redirects())
             .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECONDS))
             .cookie_provider(cookie_jar)
             .no_proxy()
@@ -104,14 +106,8 @@ impl HttpClient {
     }
 
     async fn send_request(&self, request_builder: RequestBuilder) -> Result<Response, String> {
-        request_builder
-            .headers(self.headers.clone())
-            .send()
-            .await
-            .map_err(|e| {
-                println!("[HTTP_CLIENT ERROR] HTTP request failed: {}", e);
-                format!("HTTP request execution failed: {}", e)
-            })
+        request_builder.headers(self.headers.clone()).send_limited().await
+            .map_err(|_| "网络请求失败，请稍后重试".to_string())
     }
 
     pub async fn get(&self, url: &str) -> Result<Response, String> {

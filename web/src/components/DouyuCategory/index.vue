@@ -150,7 +150,7 @@ const loadCategories = async () => {
       }
     }
   } catch (error) {
-    console.error('[DouyuCategory] load failed:', error)
+    console.error('Diagnostic: index.vue:153 (details omitted)')
     hasError.value = true
     isLoading.value = false
   }

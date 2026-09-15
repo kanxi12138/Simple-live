@@ -1,7 +1,8 @@
 [package]
 name = "dtv"
-version = "5.2.0"
-description = "A Tauri App"
+version = "5.2.1"
+description = "Non-commercial learning client for public live streams"
+license = "GPL-3.0-only"
 authors = ["c-zeong"]
 edition = "2021"
 
@@ -25,7 +26,7 @@ tauri-plugin-opener = "2.4.0"
 tauri-plugin-window-state = "2.4.1"
 window-vibrancy = "0.7.1"
  serde = { version = "1.0", features = ["derive"] }
- serde_json = "1.0.117"
+ serde_json = { version = "1.0.117", features = ["preserve_order"] }
  md-5 = "0.10.6"
  deno_core = "0.288.0"
  regex = "1.10.4"
@@ -42,6 +43,7 @@ reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"
  actix-cors = "0.7"
  awc = { version = "3.4.0", features = ["tls-rustls-0_22"] }
  bytes = "1"
+bytes04 = { package = "bytes", version = "0.4" }
  log = "0.4"
  thiserror = "1.0"
  base64 = "0.21"
@@ -62,7 +64,6 @@ reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"
  
  specta = { version = "2.0.0-rc.9", features = ["serde", "derive", "function"] }
  tauri-plugin-os = "2.3.0"
-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
 brotlic = "0.8"
 cookie = "0.18"
 html-escape = "0.2"

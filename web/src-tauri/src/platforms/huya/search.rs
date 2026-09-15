@@ -1,3 +1,4 @@
+use crate::platforms::common::request_limit::LimitedRequest;
 use reqwest::header::{
     HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, ORIGIN, REFERER, USER_AGENT,
 };
@@ -17,7 +18,7 @@ pub async fn search_huya_anchors(
     keyword: String,
     page: Option<usize>,
 ) -> Result<Vec<HuyaAnchorItem>, String> {
-    let client = reqwest::Client::builder()
+    let client = reqwest::Client::builder().redirect(crate::network_policy::redirects())
         .no_proxy()
         .build()
         .map_err(|e| e.to_string())?;
@@ -32,7 +33,7 @@ pub async fn search_huya_anchors(
     headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
     headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("zh-CN,zh;q=0.9"));
 
-    let page_num = page.unwrap_or(1);
+    let page_num = page.unwrap_or(1).max(1);
 
     let resp = client
         .get(url)
@@ -48,7 +49,7 @@ pub async fn search_huya_anchors(
             ("rows", "20"),
             ("start", &((page_num - 1) * 20).to_string()),
         ])
-        .send()
+        .send_limited()
         .await
         .map_err(|e| e.to_string())?
         .error_for_status()
@@ -57,19 +58,25 @@ pub async fn search_huya_anchors(
     let text = resp.text().await.map_err(|e| e.to_string())?;
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let mut items = vec![];
-    if let Some(list) = v
+    let list = v
         .get("response")
         .and_then(|r| r.get("1"))
         .and_then(|d| d.get("docs"))
         .and_then(|a| a.as_array())
+        .ok_or("虎牙搜索响应缺少结果列表")?;
     {
         for item in list {
+            let room_id = item.get("room_id").and_then(|value| match value {
+                serde_json::Value::String(text) => Some(text.clone()),
+                serde_json::Value::Number(number) => Some(number.to_string()),
+                _ => None,
+            }).filter(|room| !room.is_empty() && room != "0");
+            let Some(room_id) = room_id else {
+                log::warn!("Diagnostic: search.rs:74 (details omitted)");
+                continue;
+            };
             let anchor = HuyaAnchorItem {
-                room_id: item
-                    .get("room_id")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0)
-                    .to_string(),
+                room_id,
                 avatar: item
                     .get("game_avatarUrl180")
                     .and_then(|v| v.as_str())

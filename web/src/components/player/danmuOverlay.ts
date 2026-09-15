@@ -225,14 +225,14 @@ export const applyDanmuOverlayPreferences = (
     try {
       overlay.setFontSize?.(fontSizeValue);
     } catch (error) {
-      console.warn('[Player] Failed to apply danmu font size:', error);
+      console.warn('Diagnostic: danmuOverlay.ts:228 (details omitted)');
     }
   }
   try {
     const areaValue = sanitizeDanmuArea(danmuSettings.area);
     overlay.setArea?.({ start: 0, end: areaValue });
   } catch (error) {
-    console.warn('[Player] Failed to apply danmu area:', error);
+    console.warn('Diagnostic: danmuOverlay.ts:235 (details omitted)');
   }
   try {
     overlay.setAllDuration?.('scroll', danmuSettings.duration);
@@ -275,7 +275,7 @@ export const syncDanmuEnabledState = (
     const host = playerRoot?.querySelector('.player-danmu-overlay') as HTMLElement | null;
     host?.style.setProperty('--danmu-opacity', String(targetOpacity));
   } catch (error) {
-    console.warn('[Player] Failed updating danmu enabled state:', error);
+    console.warn('Diagnostic: danmuOverlay.ts:278 (details omitted)');
   }
 };
 
@@ -318,7 +318,7 @@ export const createDanmuOverlay = (
     syncDanmuEnabledState(overlay, danmuSettings, isDanmuEnabled, player.root as HTMLElement);
     return overlay;
   } catch (error) {
-    console.error('[Player] Failed to initialize danmu.js overlay:', error);
+    console.error('Diagnostic: danmuOverlay.ts:321 (details omitted)');
     return null;
   }
 };

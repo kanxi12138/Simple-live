@@ -17,10 +17,8 @@ export interface DtvConfigPayload {
 }
 
 const EXACT_EXPORTABLE_KEYS = new Set<string>([
-  'bilibili_cookie',
   'danmu_block_keywords',
   'dtv_custom_categories_v1',
-  'dtv_custom_m3u8_sources_v1',
   'dtv_danmu_preferences_v1',
   'dtv_player_danmu_collapsed',
   'dtv_player_volume_v1',

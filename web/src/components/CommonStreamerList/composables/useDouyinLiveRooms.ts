@@ -1,6 +1,6 @@
 import { ref } from 'vue';
 import type { Ref } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../../services/platformInvoke';
 import type { CommonStreamer } from '../../../platforms/common/streamerTypes';
 
 export function useDouyinLiveRooms(
@@ -25,7 +25,7 @@ export function useDouyinLiveRooms(
     try {
       currentMsToken.value = await invoke<string>('generate_douyin_ms_token');
     } catch (e) {
-      console.error('[useDouyinLiveRoomsCommon] Failed to fetch msToken:', e);
+      console.error('Diagnostic: useDouyinLiveRooms.ts:28 (details omitted)');
       error.value = 'Failed to initialize session token.';
       currentMsToken.value = null;
       return false;
@@ -40,7 +40,7 @@ export function useDouyinLiveRooms(
       title: rawRoom.title || '未知标题',
       nickname: rawRoom.owner_nickname || '未知主播',
       avatar: rawRoom.avatar_url || '',
-      room_cover: rawRoom.cover_url || 'https://via.placeholder.com/320x180.png?text=No+Image',
+      room_cover: rawRoom.cover_url || '',
       viewer_count_str: rawRoom.user_count_str || '0 人',
       platform: 'douyin',
       web_id: webId,
@@ -116,7 +116,7 @@ export function useDouyinLiveRooms(
     }
 
     if (!currentMsToken.value) {
-      console.error('[useDouyinLiveRoomsCommon] msToken is not set. Aborting fetchRooms.');
+      console.error('Diagnostic: useDouyinLiveRooms.ts:119 (details omitted)');
       error.value = 'Session token is missing. Please refresh or select category again.';
       if (!isLoadMore) isLoading.value = false;
       else isLoadingMore.value = false;
@@ -137,12 +137,12 @@ export function useDouyinLiveRooms(
       if (page.rooms.length > 0) {
         applyRoomsPage(page, isLoadMore);
       } else {
-        console.warn('[useDouyinLiveRoomsCommon] No rooms array in response or invalid structure (expected response.rooms to be an array).');
+        console.warn('Diagnostic: useDouyinLiveRooms.ts:140 (details omitted)');
         if (!isLoadMore) rooms.value = [];
         hasMore.value = false;
       }
     } catch (e: any) {
-      console.error('[useDouyinLiveRoomsCommon] Error fetching rooms:', e);
+      console.error('Diagnostic: useDouyinLiveRooms.ts:145 (details omitted)');
       error.value = typeof e === 'string' ? e : (e?.message || 'Failed to fetch rooms');
       if (!isLoadMore) {
         hasMore.value = false;
@@ -225,7 +225,7 @@ export function useDouyinLiveRooms(
         await fetchRooms(0, false);
       }
     } catch (e: any) {
-      console.error('[useDouyinLiveRoomsCommon] Error refreshing random rooms:', e);
+      console.error('Diagnostic: useDouyinLiveRooms.ts:228 (details omitted)');
       error.value = typeof e === 'string' ? e : (e?.message || 'Failed to refresh rooms');
       hasMore.value = false;
       rooms.value = [];
@@ -270,7 +270,7 @@ export function useDouyinLiveRooms(
       const randomIndex = Math.floor(Math.random() * nonEmptyPages.length);
       appendUniqueRooms(nonEmptyPages[randomIndex].rooms);
     } catch (e: any) {
-      console.error('[useDouyinLiveRoomsCommon] Error appending random rooms:', e);
+      console.error('Diagnostic: useDouyinLiveRooms.ts:273 (details omitted)');
       error.value = typeof e === 'string' ? e : (e?.message || 'Failed to append rooms');
     } finally {
       isLoadingMore.value = false;

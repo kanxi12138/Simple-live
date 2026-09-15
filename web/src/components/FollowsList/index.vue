@@ -174,7 +174,7 @@ import { motion } from 'motion-v';
 
   import { refreshDouyuFollowedStreamer } from '../../platforms/douyu/followListHelper';
   import { refreshDouyinFollowedStreamer } from '../../platforms/douyin/followListHelper';
-  import { invoke } from '@tauri-apps/api/core';
+  import { invoke } from '../../services/platformInvoke';
   import StreamerItem from './StreamerItem.vue';
   import FollowOverlay from './FollowOverlay.vue';
   import FilterChips from './FilterChips.vue';
@@ -526,7 +526,7 @@ import { motion } from 'motion-v';
     
     const trimmedName = newName.trim();
     if (!trimmedName) {
-      console.warn('Folder name cannot be empty');
+      console.warn('Diagnostic: index.vue:529 (details omitted)');
       return;
     }
     
@@ -1093,7 +1093,7 @@ import { motion } from 'motion-v';
               avatarUrl: (res && res.avatar) ? res.avatar : streamer.avatarUrl,
             };
           } else {
-            console.warn(`Unsupported platform for refresh: ${streamer.platform}`);
+            console.warn('Diagnostic: index.vue:1096 (details omitted)');
             updates.push({
               originalKey: `${streamer.platform}:${streamer.id}`,
               updated: streamer,
@@ -1110,7 +1110,7 @@ import { motion } from 'motion-v';
             } as FollowedStreamer,
           });
         } catch (e) {
-          console.error(`[FollowsList] Error during refresh for ${streamer.platform}/${streamer.id}, returning original:`, e);
+          console.error('Diagnostic: index.vue:1113 (details omitted)');
           updates.push({
             originalKey: `${streamer.platform}:${streamer.id}`,
             updated: streamer,

@@ -153,9 +153,7 @@ export const registerPlayerWatchers = (ctx: PlayerWatcherContext) => {
   watch(
     lineOptions,
     (options) => {
-      if (!options.length) {
-        currentLine.value = null;
-      } else if (!options.some((option) => option.key === currentLine.value)) {
+      if (options.length && !options.some((option) => option.key === currentLine.value)) {
         currentLine.value = options[0]?.key ?? null;
       }
       lineControlPlugin.value?.setOptions(options);
@@ -281,9 +279,7 @@ export const registerPlayerWatchers = (ctx: PlayerWatcherContext) => {
       } else if (!newRoomId) {
         if (oldRoomId && oldPlatform !== null && oldPlatform !== undefined) {
           await stopCurrentDanmakuListener(oldPlatform, oldRoomId);
-          if (oldPlatform === StreamingPlatform.DOUYU) {
-            await stopDouyuProxy();
-          }
+          await stopDouyuProxy();
         } else {
           await stopCurrentDanmakuListener();
         }

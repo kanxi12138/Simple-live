@@ -90,7 +90,7 @@ pub async fn fetch_huya_live_list(
     let client = match HttpClient::new_direct_connection() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[Huya Backend] Failed to init HTTP client: {}", e);
+            eprintln!("Diagnostic: live_list.rs:93 (details omitted)");
             return HuyaLiveListFrontendResponse {
                 error: 500,
                 msg: Some(e),
@@ -103,7 +103,7 @@ pub async fn fetch_huya_live_list(
     let resp_value: serde_json::Value = match client.get_json::<serde_json::Value>(&url).await {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[Huya Backend] Request failed: {}", e);
+            eprintln!("Diagnostic: live_list.rs:106 (details omitted)");
             return HuyaLiveListFrontendResponse {
                 error: 500,
                 msg: Some(e),

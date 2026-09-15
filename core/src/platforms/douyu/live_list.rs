@@ -1,3 +1,4 @@
+use crate::platforms::common::request_limit::LimitedRequest;
 use serde::{Deserialize, Serialize};
 use tauri::command;
 
@@ -103,7 +104,7 @@ pub async fn fetch_live_list(offset: u32, cate2: String, limit: u32) -> Frontend
         offset, cate2, limit
     );
 
-    let client = reqwest::Client::builder()
+    let client = reqwest::Client::builder().redirect(crate::network_policy::redirects())
         .no_proxy()
         .build()
         .map_err(|e| e.to_string())
@@ -111,13 +112,13 @@ pub async fn fetch_live_list(offset: u32, cate2: String, limit: u32) -> Frontend
     let response_result = client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1")
-        .send()
+        .send_limited()
         .await;
 
     let response = match response_result {
         Ok(res) => res,
         Err(e) => {
-            eprintln!("[Backend fetch_live_list] Reqwest error: {}", e);
+            eprintln!("Diagnostic: live_list.rs:120 (details omitted)");
             return FrontendLiveListResponse {
                 error: 500,
                 msg: Some(format!("Network request failed: {}", e)),
@@ -128,11 +129,7 @@ pub async fn fetch_live_list(offset: u32, cate2: String, limit: u32) -> Frontend
 
     if !response.status().is_success() {
         let status_code = response.status().as_u16() as i32;
-        let err_msg = format!(
-            "[Backend fetch_live_list] API request failed with status: {}",
-            response.status()
-        );
-        eprintln!("{}", err_msg);
+        eprintln!("Diagnostic: live_list.rs:135 (details omitted)");
         return FrontendLiveListResponse {
             error: status_code,
             msg: Some(format!("Douyu API request failed: {}", response.status())),
@@ -143,10 +140,7 @@ pub async fn fetch_live_list(offset: u32, cate2: String, limit: u32) -> Frontend
     let text = match response.text().await {
         Ok(t) => t,
         Err(e) => {
-            eprintln!(
-                "[Backend fetch_live_list] Error reading response text: {}",
-                e
-            );
+            eprintln!("Diagnostic: live_list.rs:146 (details omitted)");
             return FrontendLiveListResponse {
                 error: 500,
                 msg: Some(format!("Failed to read response text: {}", e)),
@@ -186,10 +180,7 @@ pub async fn fetch_live_list(offset: u32, cate2: String, limit: u32) -> Frontend
                         data: Some(frontend_data),
                     }
                 } else {
-                    eprintln!(
-                        "[Backend fetch_live_list] API success but no data field. Raw: {}",
-                        text
-                    );
+                    eprintln!("Diagnostic: live_list.rs:189 (details omitted)");
                     FrontendLiveListResponse {
                         error: -1,
                         msg: Some("Douyu API success code but no data field.".to_string()),
@@ -197,10 +188,7 @@ pub async fn fetch_live_list(offset: u32, cate2: String, limit: u32) -> Frontend
                     }
                 }
             } else {
-                eprintln!(
-                    "[Backend fetch_live_list] API returned error {}. Msg: {:?}. Raw: {}",
-                    douyu_response.error, douyu_response.msg, text
-                );
+                eprintln!("Diagnostic: live_list.rs:200 (details omitted)");
                 FrontendLiveListResponse {
                     error: douyu_response.error,
                     msg: douyu_response
@@ -211,10 +199,7 @@ pub async fn fetch_live_list(offset: u32, cate2: String, limit: u32) -> Frontend
             }
         }
         Err(e) => {
-            eprintln!(
-                "[Backend fetch_live_list] Error parsing Douyu Mobile JSON: {}. Raw: {}",
-                e, text
-            );
+            eprintln!("Diagnostic: live_list.rs:214 (details omitted)");
             FrontendLiveListResponse {
                 error: -2,
                 msg: Some(format!("Failed to parse Douyu API response: {}", e)),
@@ -237,9 +222,9 @@ pub async fn fetch_live_list_for_cate3(
         "https://www.douyu.com/gapi/rkc/directory/mixListV1/3_{}/{}?limit={}",
         cate3_id, current_page, limit
     );
-    println!("[Backend fetch_live_list_for_cate3] Fetching URL: {}", url);
+    println!("Diagnostic: live_list.rs:240 (details omitted)");
 
-    let client = match reqwest::Client::builder().no_proxy().build() {
+    let client = match reqwest::Client::builder().redirect(crate::network_policy::redirects()).no_proxy().build() {
         Ok(c) => c,
         Err(e) => {
             return FrontendLiveListResponse {
@@ -252,13 +237,13 @@ pub async fn fetch_live_list_for_cate3(
     let response_result = client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-        .send()
+        .send_limited()
         .await;
 
     let response = match response_result {
         Ok(res) => res,
         Err(e) => {
-            eprintln!("[Backend fetch_live_list_for_cate3] Reqwest error: {}", e);
+            eprintln!("Diagnostic: live_list.rs:261 (details omitted)");
             return FrontendLiveListResponse {
                 error: 500, // Simulate HTTP 500 for client error
                 msg: Some(format!("Network request failed: {}", e)),
@@ -269,11 +254,7 @@ pub async fn fetch_live_list_for_cate3(
 
     if !response.status().is_success() {
         let status_code = response.status().as_u16() as i32;
-        let err_msg = format!(
-            "[Backend fetch_live_list_for_cate3] API request failed with status: {}",
-            response.status()
-        );
-        eprintln!("{}", err_msg);
+        eprintln!("Diagnostic: live_list.rs:276 (details omitted)");
         return FrontendLiveListResponse {
             error: status_code,
             msg: Some(format!("Douyu API request failed: {}", response.status())),
@@ -284,10 +265,7 @@ pub async fn fetch_live_list_for_cate3(
     let text = match response.text().await {
         Ok(t) => t,
         Err(e) => {
-            eprintln!(
-                "[Backend fetch_live_list_for_cate3] Error reading response text: {}",
-                e
-            );
+            eprintln!("Diagnostic: live_list.rs:287 (details omitted)");
             return FrontendLiveListResponse {
                 error: 500,
                 msg: Some(format!("Failed to read response text: {}", e)),
@@ -331,7 +309,7 @@ pub async fn fetch_live_list_for_cate3(
                         data: Some(frontend_data),
                     }
                 } else {
-                    eprintln!("[Backend fetch_live_list_for_cate3] API success but no data field. Raw: {}", text);
+                    eprintln!("Diagnostic: live_list.rs:334 (details omitted)");
                     FrontendLiveListResponse {
                         error: -1,
                         msg: Some("Douyu API success code but no data field.".to_string()),
@@ -339,10 +317,7 @@ pub async fn fetch_live_list_for_cate3(
                     }
                 }
             } else {
-                eprintln!(
-                    "[Backend fetch_live_list_for_cate3] API returned error {}. Msg: {:?}. Raw: {}",
-                    douyu_response.code, douyu_response.msg, text
-                );
+                eprintln!("Diagnostic: live_list.rs:342 (details omitted)");
                 FrontendLiveListResponse {
                     error: douyu_response.code,
                     msg: douyu_response
@@ -353,10 +328,7 @@ pub async fn fetch_live_list_for_cate3(
             }
         }
         Err(e) => {
-            eprintln!(
-                "[Backend fetch_live_list_for_cate3] Error parsing Douyu V1 API JSON: {}. Raw: {}",
-                e, text
-            );
+            eprintln!("Diagnostic: live_list.rs:356 (details omitted)");
             FrontendLiveListResponse {
                 error: -2,
                 msg: Some(format!("Failed to parse Douyu API response: {}", e)),

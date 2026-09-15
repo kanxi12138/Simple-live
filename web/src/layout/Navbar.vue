@@ -152,8 +152,9 @@
           </template>
           <template v-else>
             <div class="config-menu__header">配置迁移</div>
+            <LegalNotices />
             <p class="config-menu__description">
-              导出当前设备上的关注、文件夹、自定义分组、主题和播放器偏好；如已登录，还会包含 Bilibili 登录态。
+              导出当前设备上的关注、文件夹、自定义分组、主题和播放器偏好；不包含登录凭据。
             </p>
 
             <button
@@ -217,9 +218,10 @@
 </template>
 
 <script setup lang="ts">
+import LegalNotices from '../components/Common/LegalNotices.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ComponentPublicInstance } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../services/platformInvoke';
 import { platform as detectPlatform } from '@tauri-apps/plugin-os';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { getVersion } from '@tauri-apps/api/app';
@@ -375,7 +377,7 @@ const ensureProxyStarted = async () => {
       const base = await invoke<string>('start_static_proxy_server');
       proxyBase.value = base;
     } catch (e) {
-      console.error('[Navbar] Failed to start static proxy server', e);
+      console.error('Diagnostic: Navbar.vue:378 (details omitted)');
     }
   }
 };
@@ -418,7 +420,7 @@ onMounted(async () => {
   try {
     detectedPlatform.value = await detectPlatform();
   } catch (error) {
-    console.error('[Navbar] Failed to detect platform', error);
+    console.error('Diagnostic: Navbar.vue:421 (details omitted)');
     if (typeof navigator !== 'undefined') {
       const ua = navigator.userAgent.toLowerCase();
       if (ua.includes('windows')) {
@@ -449,7 +451,7 @@ onMounted(async () => {
   try {
     appVersion.value = await getVersion();
   } catch (error) {
-    console.error('[Navbar] Failed to read app version', error);
+    console.error('Diagnostic: Navbar.vue:452 (details omitted)');
   }
 });
 
@@ -555,7 +557,7 @@ const handleExportConfig = async () => {
     await copyTextToClipboard(JSON.stringify(payload));
     setConfigStatus('success', '已导出所有配置至粘贴板！');
   } catch (error: any) {
-    console.error('[Navbar] Failed exporting config:', error);
+    console.error('Diagnostic: Navbar.vue:558 (details omitted)');
     setConfigStatus('error', error?.message || '导出配置失败，请稍后重试。');
   } finally {
     isExportingConfig.value = false;
@@ -583,7 +585,7 @@ const handleConfirmImportText = () => {
       window.location.reload();
     }, 360);
   } catch (error: any) {
-    console.error('[Navbar] Failed importing config:', error);
+    console.error('Diagnostic: Navbar.vue:586 (details omitted)');
     setConfigStatus('error', '导入失败！');
   }
 };
@@ -600,7 +602,7 @@ const openGithub = async () => {
       window.open('https://github.com/kanxi12138/SLR', '_blank', 'noopener,noreferrer');
       return;
     }
-    console.error('[Navbar] Failed to open GitHub', error);
+    console.error('Diagnostic: Navbar.vue:603 (details omitted)');
   }
 };
 
@@ -632,7 +634,7 @@ const handleSearch = () => {
 
   searchTimeout = window.setTimeout(() => {
     performSearchBasedOnInput();
-  }, 500);
+  }, 400);
 };
 
 const handleSearchButtonClick = async () => {

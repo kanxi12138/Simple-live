@@ -43,11 +43,7 @@ const handleFollow = () => {
     avatarUrl: '',
   };
 
-  console.log('[DouyinPlayerView] 即将写入关注缓存：', {
-    platform: Platform.DOUYIN,
-    id: idToSave,
-    ...streamerToFollow,
-  });
+  console.log('Diagnostic: DouyinPlayerView.vue:46 (details omitted)');
 
   followStore.followStreamer({
     ...streamerToFollow,
@@ -55,9 +51,7 @@ const handleFollow = () => {
     platform: Platform.DOUYIN,
   });
 
-  // 查看 localStorage 中的缓存内容
-  const cached = localStorage.getItem('followedStreamers');
-  console.log('[DouyinPlayerView] 当前 localStorage.followedStreamers：', cached);
+  console.log('Diagnostic: DouyinPlayerView.vue:60 (details omitted)');
 };
 
 const handleUnfollow = () => {
@@ -65,7 +59,7 @@ const handleUnfollow = () => {
 };
 
 const handleClosePlayer = () => {
-  console.log('[DouyinPlayerView] Close button clicked. Navigating to Douyin home.');
+  console.log('Diagnostic: DouyinPlayerView.vue:68 (details omitted)');
   router.replace('/douyin');
 };
 

@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import type { Ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '../../../services/platformInvoke'
 import type { CommonStreamer } from '../../../platforms/common/streamerTypes'
 import { useImageProxy } from '../../FollowsList/useProxy'
 

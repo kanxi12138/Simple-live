@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 pub mod http_client;
+pub mod request_limit;
 pub mod types;
 pub mod types_rust;
 

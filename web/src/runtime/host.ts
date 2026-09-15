@@ -23,7 +23,7 @@ export const setNativeTheme = async (theme: 'light' | 'dark'): Promise<void> => 
     const current = mod.WebviewWindow.getCurrent();
     await current.setTheme(theme);
   } catch (error) {
-    console.warn('[runtime/host] setNativeTheme skipped:', error);
+    console.warn('Diagnostic: host.ts:26 (details omitted)');
   }
 };
 
@@ -32,7 +32,7 @@ export const openExternal = async (url: string): Promise<void> => {
   try {
     await openUrl(url);
   } catch (error) {
-    console.warn('[runtime/host] opener failed, falling back to window.open:', error);
+    console.warn('Diagnostic: host.ts:35 (details omitted)');
     if (isBrowser) {
       window.open(url, '_blank', 'noopener,noreferrer');
     }

@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '../../services/platformInvoke'
 
 export function useImageProxy() {
   const proxyBase = ref('');
@@ -25,7 +25,7 @@ export function useImageProxy() {
       }
       return !!proxyBase.value;
     } catch (e) {
-      console.warn('[useImageProxy] ensureProxyStarted failed:', e);
+      console.warn('Diagnostic: useProxy.ts:28 (details omitted)');
       return false;
     }
   }

@@ -1,3 +1,4 @@
+use crate::platforms::common::request_limit::LimitedRequest;
 use crate::platforms::common::FollowHttpClient;
 use md5;
 use md5::{Digest, Md5};
@@ -33,7 +34,7 @@ async fn get_wbi_keys(
     let resp = client
         .get(url)
         .headers(headers.clone())
-        .send()
+        .send_limited()
         .await
         .map_err(|e| format!("Failed to get WBI keys: {}", e))?;
     let text = resp
@@ -153,7 +154,7 @@ pub async fn fetch_bilibili_streamer_info(
         .get(base)
         .headers(headers.clone())
         .query(&params)
-        .send()
+        .send_limited()
         .await
         .map_err(|e| format!("Room info request failed: {}", e))?;
     let status = resp.status();

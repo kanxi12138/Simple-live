@@ -8,7 +8,7 @@ import { DouyuRawCategoriesResponseData, DouyuRawCategoryGroup, DouyuRawGameCate
  */
 export function parseDouyuRoomDataToStreamerDetails(roomId: string, data: DouyuRoomInfo): StreamerDetails {
   if (!data || !data.room_id) {
-    console.error('[Douyu Parser] Invalid data provided to parseDouyuRoomDataToStreamerDetails for room:', roomId, data);
+    console.error('Diagnostic: parsers.ts:11 (details omitted)');
     return {
       roomId: roomId,
       platform: 'douyu',
@@ -107,7 +107,7 @@ export function parseDouyuDanmakuMessage(rawPayload: any): CommonDanmakuMessage 
  */
 export function parseDouyuStreamDataToPlaybackDetails(roomId: string, rawUrl: string): StreamPlaybackDetails {
   if (!rawUrl) {
-    console.error('[Douyu Parser] Invalid rawUrl provided to parseDouyuStreamDataToPlaybackDetails for room:', roomId);
+    console.error('Diagnostic: parsers.ts:110 (details omitted)');
     // Consider a more robust error object or a specific error state
     return {
       platform: 'douyu',
@@ -143,7 +143,7 @@ export function parseDouyuStreamDataToPlaybackDetails(roomId: string, rawUrl: st
  */
 export function parseDouyuCategories(rawData: DouyuRawCategoriesResponseData): CommonCategoryGroup[] {
   if (!rawData || !rawData.category_groups || !Array.isArray(rawData.category_groups)) {
-    console.warn('[Douyu Parser] Invalid or empty category_groups in rawData for parseDouyuCategories:', rawData);
+    console.warn('Diagnostic: parsers.ts:146 (details omitted)');
     return [];
   }
 

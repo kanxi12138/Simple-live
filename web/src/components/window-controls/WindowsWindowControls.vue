@@ -60,7 +60,7 @@ const syncMaximizedState = async () => {
   try {
     isMaximized.value = await currentWindow.isMaximized();
   } catch (error) {
-    console.error('[WindowsWindowControls] Failed to query maximized state', error);
+    console.error('Diagnostic: WindowsWindowControls.vue:63 (details omitted)');
   }
 };
 
@@ -72,7 +72,7 @@ const handleMinimize = async (event?: MouseEvent) => {
   try {
     await currentWindow.minimize();
   } catch (error) {
-    console.error('[WindowsWindowControls] Failed to minimize window', error);
+    console.error('Diagnostic: WindowsWindowControls.vue:75 (details omitted)');
   }
 };
 
@@ -89,7 +89,7 @@ const handleMaximize = async (event?: MouseEvent) => {
     }
     await syncMaximizedState();
   } catch (error) {
-    console.error('[WindowsWindowControls] Failed to toggle maximize', error);
+    console.error('Diagnostic: WindowsWindowControls.vue:92 (details omitted)');
   }
 };
 
@@ -101,7 +101,7 @@ const handleClose = async (event?: MouseEvent) => {
   try {
     await currentWindow.close();
   } catch (error) {
-    console.error('[WindowsWindowControls] Failed to close window', error);
+    console.error('Diagnostic: WindowsWindowControls.vue:104 (details omitted)');
   }
 };
 
@@ -112,7 +112,7 @@ onMounted(async () => {
       syncMaximizedState();
     });
   } catch (error) {
-    console.error('[WindowsWindowControls] Failed to listen for resize events', error);
+    console.error('Diagnostic: WindowsWindowControls.vue:115 (details omitted)');
   }
 });
 

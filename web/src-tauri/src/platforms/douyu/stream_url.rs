@@ -1,8 +1,9 @@
+use crate::platforms::common::request_limit::LimitedRequest;
+#[cfg(not(target_os = "android"))]
 use deno_core::{JsRuntime, RuntimeOptions};
 use html_escape::decode_html_entities;
 use reqwest::{
     header::{HeaderMap, HeaderValue},
-    redirect::Policy,
     Client,
 };
 use regex::Regex;
@@ -16,6 +17,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 struct BetardRoomInfo {
     room_id: Option<Value>,
     show_status: Option<Value>,
+    #[serde(rename = "videoLoop")]
+    video_loop: Option<Value>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -72,6 +75,7 @@ const CRYPTO_JS: &str = include_str!("cryptojs.min.js");
 #[cfg(target_os = "linux")]
 static JS_RUNTIME_INIT: Once = Once::new();
 
+#[cfg(not(target_os = "android"))]
 fn ensure_js_runtime_platform_initialized() {
     #[cfg(target_os = "linux")]
     JS_RUNTIME_INIT.call_once(|| {
@@ -95,6 +99,9 @@ fn normalize_douyu_cdn(input: Option<&str>) -> &'static str {
 
 impl DouYu {
     async fn new(rid: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        if rid.is_empty() || !rid.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+            return Err("斗鱼房间号无效".into());
+        }
         // 迁移到 reqwest：禁用系统代理、限制重定向、设置默认 UA/语言等头部
         let mut default_headers = HeaderMap::new();
         default_headers.insert(
@@ -105,8 +112,7 @@ impl DouYu {
             "Accept-Language",
             HeaderValue::from_static("zh-CN,zh;q=0.9"),
         );
-        let client = Client::builder()
-            .redirect(Policy::limited(10))
+        let client = Client::builder().redirect(crate::network_policy::redirects())
             .no_proxy()
             .default_headers(default_headers)
             .build()?;
@@ -118,6 +124,7 @@ impl DouYu {
         })
     }
 
+    #[cfg(not(target_os = "android"))]
     async fn execute_js_sign(
         &self,
         script: &str,
@@ -149,6 +156,20 @@ impl DouYu {
         Ok(params)
     }
 
+    #[cfg(target_os = "android")]
+    async fn execute_js_sign(
+        &self, script: &str, rid: &str, did: &str, ts: i64,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        if script.len() > 1024 * 1024 { return Err("斗鱼签名脚本过大".into()); }
+        // Isolated interpreter: no WebView, cookies, filesystem, network or IPC callbacks.
+        let context = quick_js::Context::builder().memory_limit(32 * 1024 * 1024).build()?;
+        context.eval(CRYPTO_JS)?;
+        context.eval(script)?;
+        let rid = serde_json::to_string(rid)?;
+        let did = serde_json::to_string(did)?;
+        Ok(context.eval_as::<String>(&format!("ub98484234({rid},{did},{ts});"))?)
+    }
+
     async fn resolve_room_id_from_mobile_page(
         &self,
     ) -> Result<String, Box<dyn std::error::Error>> {
@@ -157,7 +178,7 @@ impl DouYu {
             .client
             .get(url)
             .header("Referer", format!("https://m.douyu.com/{}", self.rid))
-            .send()
+            .send_limited()
             .await?
             .text()
             .await?;
@@ -176,7 +197,7 @@ impl DouYu {
             .client
             .get(url)
             .header("Referer", format!("https://www.douyu.com/{}", self.rid))
-            .send()
+            .send_limited()
             .await?
             .text()
             .await?;
@@ -190,13 +211,19 @@ impl DouYu {
                         .as_ref()
                         .and_then(value_to_i32)
                         .unwrap_or(0);
-                    return Ok((room_id, show_status == 1));
+                    let is_loop = room.video_loop.as_ref().and_then(value_to_i32) == Some(1);
+                    return Ok((room_id, show_status == 1 && !is_loop));
                 }
             }
         }
 
         let room_id = self.resolve_room_id_from_mobile_page().await?;
-        Ok((room_id, true))
+        let json: Value = self.client.get(format!("https://www.douyu.com/swf_api/h5room/{room_id}"))
+            .send_limited().await?.error_for_status()?.json().await?;
+        let data = json.get("data").ok_or("斗鱼房间状态获取失败")?;
+        let status = data.get("show_status").and_then(value_to_i32)
+            .ok_or("斗鱼房间状态缺失")?;
+        Ok((room_id, status == 1 && data.get("videoLoop").and_then(value_to_i32) != Some(1)))
     }
 
     async fn get_h5_enc(&self, room_id: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -205,7 +232,7 @@ impl DouYu {
             .client
             .get(url)
             .header("Referer", format!("https://www.douyu.com/{}", room_id))
-            .send()
+            .send_limited()
             .await?
             .json::<Value>()
             .await?;
@@ -251,7 +278,7 @@ impl DouYu {
             .post(url)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(payload)
-            .send()
+            .send_limited()
             .await?
             .json::<Value>()
             .await?;
@@ -284,7 +311,7 @@ impl DouYu {
         cdns_sorted.sort_by(|a, b| {
             let a_is_scdn = a.starts_with("scdn");
             let b_is_scdn = b.starts_with("scdn");
-            (a_is_scdn, a).cmp(&(b_is_scdn, b))
+            a_is_scdn.cmp(&b_is_scdn)
         });
 
         let variants = data
@@ -309,6 +336,9 @@ impl DouYu {
             })
             .unwrap_or_default();
 
+        if variants.is_empty() || cdns_sorted.is_empty() {
+            return Err("斗鱼未返回可用画质或线路".into());
+        }
         Ok(DouyuPlayInfo {
             variants,
             cdns: cdns_sorted,
@@ -330,7 +360,7 @@ impl DouYu {
             .header("Content-Type", "application/x-www-form-urlencoded")
             .header("Referer", format!("https://www.douyu.com/{}", room_id))
             .body(payload)
-            .send()
+            .send_limited()
             .await?
             .json::<Value>()
             .await?;
@@ -391,7 +421,7 @@ impl DouYu {
             .variants
             .iter()
             .map(|variant| variant.rate)
-            .max()
+            .next()
             .unwrap_or(0);
         let selected_cdn = Self::select_cdn(cdn, &play_info.cdns);
         self.get_play_url(&real_room_id, &sign_data, best_rate, &selected_cdn)
@@ -414,12 +444,9 @@ impl DouYu {
         let sign_data = self.build_sign_params(&real_room_id).await?;
         let play_info = self.get_play_qualities(&real_room_id, &sign_data).await?;
         let selected_rate = Self::resolve_rate_for_quality(quality, &play_info.variants)
-            .or_else(|| play_info.variants.iter().map(|v| v.rate).max())
+            .or_else(|| play_info.variants.first().map(|variant| variant.rate))
             .unwrap_or(0);
-        println!(
-            "[Douyu Stream URL] Requested quality '{}', resolved rate {} (variants: {:?})",
-            quality, selected_rate, play_info.variants
-        );
+        println!("Diagnostic: stream_url.rs:429 (details omitted)");
         let selected_cdn = Self::select_cdn(cdn, &play_info.cdns);
         self.get_play_url(&real_room_id, &sign_data, selected_rate, &selected_cdn)
             .await
@@ -430,102 +457,8 @@ impl DouYu {
             return None;
         }
 
-        let trimmed = quality.trim();
-        let ascii_lower = trimmed.to_ascii_lowercase();
-        let canonical = if trimmed.contains('原') || ascii_lower == "origin" {
-            "原画"
-        } else if trimmed.contains('高') || ascii_lower == "high" {
-            "高清"
-        } else if trimmed.contains('标') || ascii_lower == "standard" {
-            "标清"
-        } else {
-            trimmed
-        };
-
-        let find_by_keywords = |keywords: &[&str], exclude_zero: bool| -> Option<i32> {
-            for keyword in keywords {
-                if let Some(item) = variants.iter().find(|v| v.name.contains(keyword)) {
-                    if exclude_zero && item.rate == 0 {
-                        continue;
-                    }
-                    return Some(item.rate);
-                }
-            }
-            None
-        };
-
-        match canonical {
-            "原画" => {
-                if let Some(item) = variants.iter().find(|v| v.rate == 0) {
-                    return Some(item.rate);
-                }
-                if let Some(rate) = find_by_keywords(&["原画", "蓝光8M", "蓝光"], false) {
-                    return Some(rate);
-                }
-                variants.iter().map(|v| v.rate).min()
-            }
-            "高清" => {
-                if let Some(item) = variants.iter().find(|v| v.rate == 4) {
-                    return Some(item.rate);
-                }
-                if let Some(rate) = find_by_keywords(&["蓝光", "蓝光4M"], false) {
-                    return Some(rate);
-                }
-                if let Some(rate) = find_by_keywords(&["超清"], true) {
-                    return Some(rate);
-                }
-                if let Some(rate) = find_by_keywords(&["高清"], true) {
-                    return Some(rate);
-                }
-                variants
-                    .iter()
-                    .filter(|v| v.rate != 0)
-                    .max_by_key(|v| v.bit.unwrap_or(0))
-                    .map(|v| v.rate)
-                    .or_else(|| {
-                        variants
-                            .iter()
-                            .filter(|v| v.rate != 0)
-                            .max_by_key(|v| v.rate)
-                            .map(|v| v.rate)
-                    })
-            }
-            "标清" => {
-                if let Some(item) = variants.iter().find(|v| v.rate == 3) {
-                    return Some(item.rate);
-                }
-                if let Some(rate) = find_by_keywords(&["超清"], true) {
-                    return Some(rate);
-                }
-                if let Some(rate) = find_by_keywords(&["流畅"], true) {
-                    return Some(rate);
-                }
-                if let Some(rate) = find_by_keywords(&["标清"], true) {
-                    return Some(rate);
-                }
-                if let Some(rate) = find_by_keywords(&["普清"], true) {
-                    return Some(rate);
-                }
-                variants
-                    .iter()
-                    .filter(|v| v.rate != 0)
-                    .min_by_key(|v| v.bit.unwrap_or(i32::MAX))
-                    .map(|v| v.rate)
-                    .or_else(|| {
-                        variants
-                            .iter()
-                            .filter(|v| v.rate != 0)
-                            .min_by_key(|v| v.rate)
-                            .map(|v| v.rate)
-                    })
-            }
-            _ => {
-                if let Some(rate) = find_by_keywords(&[canonical], false) {
-                    return Some(rate);
-                }
-                None
-            }
-        }
+        variants.iter().find(|variant| variant.name == quality.trim())
+            .or_else(|| variants.first()).map(|variant| variant.rate)
     }
 }
 
@@ -563,12 +496,12 @@ pub async fn fetch_douyu_room_init_cmd(room_id: String) -> Result<DouyuRoomInitI
 }
 
 #[tauri::command]
-pub async fn fetch_douyu_home_h5_enc_cmd(room_id: String) -> Result<String, String> {
+pub async fn sign_douyu_request(room_id: String) -> Result<String, String> {
     let douyu = DouYu::new(&room_id).await.map_err(|error| error.to_string())?;
     douyu
-        .get_h5_enc(&room_id)
+        .build_sign_params(&room_id)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|_| "斗鱼签名兼容处理失败，暂不可用".to_string())
 }
 
 #[tauri::command]

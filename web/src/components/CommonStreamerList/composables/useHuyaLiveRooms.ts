@@ -1,6 +1,6 @@
 import { ref } from 'vue';
 import type { Ref } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../../services/platformInvoke';
 import type { CommonStreamer } from '../../../platforms/common/streamerTypes';
 import { useImageProxy } from '../../FollowsList/useProxy';
 
@@ -109,7 +109,7 @@ export function useHuyaLiveRooms(
       currentPage.value = pageNo + 1;
 
     } catch (e: any) {
-      console.error('[useHuyaLiveRooms] invoke error', e);
+      console.error('Diagnostic: useHuyaLiveRooms.ts:112 (details omitted)');
       error.value = e?.message || '加载失败';
       if (!isLoadMore) {
         rooms.value = [];
@@ -178,7 +178,7 @@ export function useHuyaLiveRooms(
       const newRooms = resp.data.map(mapHuyaItemToCommonStreamer);
       appendUniqueRooms(newRooms);
     } catch (e: any) {
-      console.error('[useHuyaLiveRooms] append invoke error', e);
+      console.error('Diagnostic: useHuyaLiveRooms.ts:181 (details omitted)');
       error.value = e?.message || '加载失败';
     } finally {
       isLoadingMore.value = false;

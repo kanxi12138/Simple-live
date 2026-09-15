@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../services/platformInvoke';
 import type { StreamerDetails } from '../common/types';
 
 // This interface should match the Rust struct LiveStreamInfo returned by get_douyin_live_stream_url
@@ -26,9 +26,7 @@ export async function getDouyinStreamerDetails(
     const data = await invoke<LiveStreamInfoFromRust>('get_douyin_live_stream_url', { payload: rustPayload });
 
     if (data.error_message) {
-      console.error(
-        `[StreamerInfo/douyinParser.ts] Error from get_douyin_live_stream_url for room ${props.roomId}: ${data.error_message}`
-      );
+      console.error('Diagnostic: streamerInfoParser.ts:29 (details omitted)');
       // On error from API, return details with an error indication or use initial props as fallback.
       return {
         roomId: props.roomId,
@@ -59,10 +57,7 @@ export async function getDouyinStreamerDetails(
     };
 
   } catch (error) {
-    console.error(
-        `[StreamerInfo/douyinParser.ts] Exception invoking get_douyin_live_stream_url for room ${props.roomId}:`,
-         error
-    );
+    console.error('Diagnostic: streamerInfoParser.ts:62 (details omitted)');
     // On exception during invoke, return details with an error indication.
     return {
       roomId: props.roomId,

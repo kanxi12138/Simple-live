@@ -14,7 +14,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
-import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -36,20 +35,18 @@ private const val HEARTBEAT_INTERVAL_MS = 45_000L
 private const val PACKET_HEADER_SIZE = 12
 private const val MIN_PACKET_BODY_SIZE = 9
 
-private data class BackgroundPlaybackConfig(
-  val streamUrl: String,
-  val streamType: String,
-  val title: String,
-  val anchorName: String,
-)
-
 class MainActivity : TauriActivity() {
   private var playerWebView: WebView? = null
   private var isImmersiveFullscreen = false
-  private var backgroundPlaybackConfig: BackgroundPlaybackConfig? = null
-  private var isBackgroundPlaybackActive = false
   private lateinit var backPressedCallback: OnBackPressedCallback
   private val douyuDanmakuBridge = DouyuDanmakuBridge()
+  private val douyinLoginBridge by lazy {
+    DouyinLoginBridge(this) {
+      playerWebView?.evaluateJavascript(
+        "window.dispatchEvent(new Event('dtv-douyin-login-closed'));", null,
+      )
+    }
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
@@ -86,28 +83,9 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onDestroy() {
+    douyinLoginBridge.close()
     douyuDanmakuBridge.stop()
-    if (isFinishing) {
-      stopBackgroundPlayback()
-    }
     super.onDestroy()
-  }
-
-  override fun onStart() {
-    super.onStart()
-    if (isBackgroundPlaybackActive) {
-      stopBackgroundPlayback()
-      dispatchWebPlayerCommand("__DTV_RESUME_WEB_PLAYER__")
-    }
-  }
-
-  override fun onStop() {
-    val config = backgroundPlaybackConfig
-    if (config != null && !isFinishing && !isChangingConfigurations) {
-      dispatchWebPlayerCommand("__DTV_PAUSE_WEB_PLAYER__")
-      startBackgroundPlayback(config)
-    }
-    super.onStop()
   }
 
   override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -120,16 +98,16 @@ class MainActivity : TauriActivity() {
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
     playerWebView = webView
-    WebView.setWebContentsDebuggingEnabled(true)
+    WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
     webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-    webView.settings.allowFileAccessFromFileURLs = true
-    webView.settings.allowUniversalAccessFromFileURLs = true
+    webView.settings.allowFileAccessFromFileURLs = false
+    webView.settings.allowUniversalAccessFromFileURLs = false
     webView.settings.mediaPlaybackRequiresUserGesture = false
     webView.addJavascriptInterface(OrientationBridge(), "DTVOrientation")
-    webView.addJavascriptInterface(BackgroundAudioBridge(), "DTVBackgroundAudio")
     webView.addJavascriptInterface(UpdateBridge(), "DTVUpdate")
-    webView.addJavascriptInterface(DebugBridge(), "DTVDebug")
+    if (BuildConfig.DEBUG) webView.addJavascriptInterface(DebugBridge(), "DTVDebug")
     webView.addJavascriptInterface(douyuDanmakuBridge, "DTVDouyuDanmaku")
+    webView.addJavascriptInterface(douyinLoginBridge, "DTVDouyinLogin")
   }
 
   private fun fallbackBackPressed() {
@@ -156,35 +134,6 @@ class MainActivity : TauriActivity() {
     insetsController.hide(WindowInsetsCompat.Type.systemBars())
   }
 
-  private fun dispatchWebPlayerCommand(commandName: String) {
-    val script = "window.$commandName && window.$commandName();"
-    playerWebView?.post {
-      playerWebView?.evaluateJavascript(script, null)
-    }
-  }
-
-  private fun startBackgroundPlayback(config: BackgroundPlaybackConfig) {
-    val serviceIntent = Intent(this, BackgroundPlaybackService::class.java).apply {
-      action = ACTION_PLAY_BACKGROUND
-      putExtra(EXTRA_STREAM_URL, config.streamUrl)
-      putExtra(EXTRA_STREAM_TYPE, config.streamType)
-      putExtra(EXTRA_TITLE, config.title)
-      putExtra(EXTRA_ANCHOR_NAME, config.anchorName)
-    }
-    try {
-      ContextCompat.startForegroundService(this, serviceIntent)
-      isBackgroundPlaybackActive = true
-    } catch (error: RuntimeException) {
-      isBackgroundPlaybackActive = false
-      Log.e("BackgroundPlayback", "Unable to start service", error)
-    }
-  }
-
-  private fun stopBackgroundPlayback() {
-    stopService(Intent(this, BackgroundPlaybackService::class.java))
-    isBackgroundPlaybackActive = false
-  }
-
   private inner class OrientationBridge {
     @JavascriptInterface
     fun enterLandscapeFullscreen() {
@@ -207,48 +156,6 @@ class MainActivity : TauriActivity() {
       runOnUiThread {
         exitImmersiveFullscreen()
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-      }
-    }
-  }
-
-  private inner class BackgroundAudioBridge {
-    @JavascriptInterface
-    fun enable(
-      streamUrl: String?,
-      streamType: String?,
-      title: String?,
-      anchorName: String?,
-    ) {
-      update(streamUrl, streamType, title, anchorName)
-    }
-
-    @JavascriptInterface
-    fun update(
-      streamUrl: String?,
-      streamType: String?,
-      title: String?,
-      anchorName: String?,
-    ) {
-      val normalizedUrl = streamUrl?.trim().orEmpty()
-      val scheme = Uri.parse(normalizedUrl).scheme?.lowercase()
-      if (normalizedUrl.isEmpty() || (scheme != "http" && scheme != "https")) {
-        Log.e("BackgroundPlayback", "Rejected invalid stream URL")
-        return
-      }
-      val normalizedType = if (streamType == "hls") "hls" else "flv"
-      backgroundPlaybackConfig = BackgroundPlaybackConfig(
-        streamUrl = normalizedUrl,
-        streamType = normalizedType,
-        title = title?.trim().orEmpty(),
-        anchorName = anchorName?.trim().orEmpty(),
-      )
-    }
-
-    @JavascriptInterface
-    fun disable() {
-      backgroundPlaybackConfig = null
-      runOnUiThread {
-        stopBackgroundPlayback()
       }
     }
   }
@@ -302,7 +209,7 @@ class MainActivity : TauriActivity() {
   private inner class DebugBridge {
     @JavascriptInterface
     fun log(level: String?, message: String?) {
-      val safeMessage = (message ?: "").take(3000)
+      val safeMessage = "WebView diagnostic event (details omitted)"
       when ((level ?: "d").lowercase()) {
         "e" -> Log.e("DTVDebug", safeMessage)
         "w" -> Log.w("DTVDebug", safeMessage)
@@ -318,6 +225,7 @@ class MainActivity : TauriActivity() {
       .build()
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    @Volatile private var connectionGeneration = 0L
     private var webSocket: WebSocket? = null
     private var currentRoomId: String? = null
     private var pendingBuffer = ByteArrayOutputStream()
@@ -326,7 +234,7 @@ class MainActivity : TauriActivity() {
       override fun run() {
         val roomId = currentRoomId ?: return
         sendPacket("type@=mrkl/")
-        Log.d("DouyuDanmaku", "heartbeat room=$roomId")
+        Log.d("DouyuDanmaku", "Danmaku event (details omitted)")
         mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
       }
     }
@@ -346,9 +254,10 @@ class MainActivity : TauriActivity() {
         }
 
         stop()
+        val generation = connectionGeneration
         currentRoomId = normalizedRoomId
         pendingBuffer = ByteArrayOutputStream()
-        Log.i("DouyuDanmaku", "start room=$normalizedRoomId")
+        Log.i("DouyuDanmaku", "Danmaku event (details omitted)")
         dispatchDanmakuStatus("start", normalizedRoomId, "starting native websocket")
 
         val request = Request.Builder()
@@ -357,45 +266,51 @@ class MainActivity : TauriActivity() {
 
         webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
           override fun onOpen(webSocket: WebSocket, response: Response) {
-            Log.i("DouyuDanmaku", "open room=$normalizedRoomId")
+            if (generation != connectionGeneration) return
+            Log.i("DouyuDanmaku", "Danmaku event (details omitted)")
             dispatchDanmakuStatus("open", normalizedRoomId, "websocket opened")
-            sendPacket("type@=loginreq/roomid@=$normalizedRoomId/")
-            sendPacket("type@=joingroup/rid@=$normalizedRoomId/gid@=-9999/")
+            webSocket.send(ByteString.of(*encodePacket("type@=loginreq/roomid@=$normalizedRoomId/")))
+            webSocket.send(ByteString.of(*encodePacket("type@=joingroup/rid@=$normalizedRoomId/gid@=-9999/")))
             mainHandler.removeCallbacks(heartbeatRunnable)
             mainHandler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL_MS)
           }
 
           override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            if (generation != connectionGeneration) return
             dispatchDanmakuStatus("message", normalizedRoomId, "bytes=${bytes.size}")
             handleIncomingBytes(normalizedRoomId, bytes.toByteArray())
           }
 
           override fun onMessage(webSocket: WebSocket, text: String) {
+            if (generation != connectionGeneration) return
             dispatchDanmakuStatus("message", normalizedRoomId, "text=${text.length}")
             handleIncomingBytes(normalizedRoomId, text.toByteArray(StandardCharsets.UTF_8))
           }
 
           override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            Log.e("DouyuDanmaku", "failure room=$normalizedRoomId message=${t.message}")
+            if (generation != connectionGeneration) return
+            Log.e("DouyuDanmaku", "Danmaku event (details omitted)")
             dispatchDanmakuStatus("error", normalizedRoomId, t.message ?: "unknown")
           }
 
           override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            Log.w("DouyuDanmaku", "closed room=$normalizedRoomId code=$code reason=$reason")
+            if (generation != connectionGeneration) return
+            Log.w("DouyuDanmaku", "Danmaku event (details omitted)")
             dispatchDanmakuStatus("closed", normalizedRoomId, "code=$code reason=$reason")
             mainHandler.removeCallbacks(heartbeatRunnable)
           }
         })
       } catch (error: Throwable) {
-        Log.e("DouyuDanmaku", "start exception room=${roomId ?: ""} message=${error.message}")
+        Log.e("DouyuDanmaku", "Danmaku event (details omitted)")
         dispatchDanmakuStatus("error", roomId?.trim().orEmpty(), error.message ?: "unknown start exception")
       }
     }
 
     @JavascriptInterface
     fun stop() {
+      connectionGeneration += 1
       mainHandler.removeCallbacks(heartbeatRunnable)
-      webSocket?.close(1000, "client-stop")
+      webSocket?.cancel()
       webSocket = null
       currentRoomId = null
       pendingBuffer = ByteArrayOutputStream()
@@ -413,8 +328,10 @@ class MainActivity : TauriActivity() {
 
       while (cursor + PACKET_HEADER_SIZE <= data.size) {
         val packetLength = readLittleEndianInt(data, cursor)
-        if (packetLength < MIN_PACKET_BODY_SIZE) {
-          break
+        if (packetLength < MIN_PACKET_BODY_SIZE || packetLength != readLittleEndianInt(data, cursor + 4)) {
+          pendingBuffer = ByteArrayOutputStream()
+          dispatchDanmakuStatus("error", roomId, "invalid packet length")
+          return
         }
 
         val frameEnd = cursor + 4 + packetLength
@@ -427,6 +344,7 @@ class MainActivity : TauriActivity() {
         val body = String(data, bodyStart, bodyLength, StandardCharsets.UTF_8).trimEnd('\u0000')
         for (part in body.split("//")) {
           val parsed = parseStt(part)
+          if (parsed["type"] == "loginres") dispatchDanmakuStatus("ready", roomId, "login accepted")
           if (parsed["type"] == "chatmsg" && !parsed["txt"].isNullOrBlank() && !parsed["dms"].isNullOrBlank()) {
             emitDanmaku(roomId, parsed)
           }
@@ -447,7 +365,7 @@ class MainActivity : TauriActivity() {
       val content = payload["txt"].orEmpty()
       val userLevel = payload["level"]?.toIntOrNull() ?: 0
       val fansClubLevel = payload["bl"]?.toIntOrNull() ?: 0
-      Log.d("DouyuDanmaku", "chat room=$roomId user=$nickname len=${content.length}")
+      Log.d("DouyuDanmaku", "Danmaku event (details omitted)")
 
       val json = JSONObject().apply {
         put("room_id", roomId)

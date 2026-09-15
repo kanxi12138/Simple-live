@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../services/platformInvoke';
 import { openExternal } from '../../runtime/host';
 
 export interface BilibiliCookieResult {
@@ -55,7 +55,7 @@ export const ensureBilibiliCookieBootstrap = async (): Promise<BilibiliCookieRes
   try {
     return await bootstrapPromise;
   } catch (error) {
-    console.warn('[BilibiliCookie] Silent bootstrap failed:', error);
+    console.warn('Diagnostic: cookieHelper.ts:58 (details omitted)');
     return null;
   }
 };
@@ -69,7 +69,7 @@ export const ensureBilibiliLoginWindow = async (): Promise<{ label: string }> =>
         await existing.show();
         await existing.setFocus();
       } catch (error) {
-        console.warn('[BilibiliCookie] Failed to focus existing login window:', error);
+        console.warn('Diagnostic: cookieHelper.ts:72 (details omitted)');
       }
       return existing;
     }
@@ -100,12 +100,12 @@ export const ensureBilibiliLoginWindow = async (): Promise<{ label: string }> =>
       await loginWindow.show();
       await loginWindow.setFocus();
     } catch (error) {
-      console.warn('[BilibiliCookie] Unable to show or focus login window:', error);
+      console.warn('Diagnostic: cookieHelper.ts:103 (details omitted)');
     }
 
     return loginWindow;
   } catch (error) {
-    console.warn('[BilibiliCookie] multiwindow unavailable, opening external login:', error);
+    console.warn('Diagnostic: cookieHelper.ts:108 (details omitted)');
     await openExternal(BILIBILI_LOGIN_URL);
     return { label: 'main' };
   }

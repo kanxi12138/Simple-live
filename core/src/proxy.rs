@@ -1,446 +1,142 @@
-use actix_web::{dev::ServerHandle, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
-use futures_util::TryStreamExt;
+use actix_web::{dev::ServerHandle, web, App, HttpRequest, HttpResponse, HttpServer};
+use once_cell::sync::Lazy;
 use reqwest::Client;
-// awc removed for now due to API differences; using reqwest streaming
-use crate::StreamUrlStore;
 use serde::Deserialize;
-use std::io::ErrorKind;
-use std::net::{SocketAddr, TcpStream};
-use std::sync::Mutex as StdMutex;
-use std::thread;
+use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, State};
+use tauri::State;
 
-// Define a struct to hold the server handle in a Tauri managed state
 #[derive(Default)]
-pub struct ProxyServerHandle(pub StdMutex<Option<ServerHandle>>);
+pub struct ProxyServerHandle(pub Mutex<Option<ServerHandle>>);
 
-async fn find_free_port() -> u16 {
-    // Using a fixed port as requested by the user for easier debugging
-    STREAM_PROXY_PORT
+static STATIC_SERVER: Lazy<tokio::sync::Mutex<Option<(ServerHandle, String)>>> =
+    Lazy::new(|| tokio::sync::Mutex::new(None));
+
+pub(crate) fn session_id() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
 }
 
-const LOCAL_PROXY_HOST: &str = "127.0.0.1";
-const STREAM_PROXY_PORT: u16 = 34719;
-const STATIC_PROXY_PORT: u16 = 34721;
-const PROXY_STARTUP_RETRY_COUNT: usize = 30;
-const PROXY_STARTUP_RETRY_DELAY_MS: u64 = 100;
+fn cors() -> actix_cors::Cors {
+    let cors = actix_cors::Cors::default()
+        .allowed_origin("tauri://localhost")
+        .allowed_origin("http://tauri.localhost")
+        .allowed_origin("https://tauri.localhost")
+        .allowed_origin("http://localhost")
+        .allowed_origin("https://localhost")
+        .allowed_methods(vec!["GET", "HEAD", "OPTIONS"])
+        .allowed_headers(vec!["Range", "Content-Type"])
+        .expose_headers(vec!["Content-Range", "Content-Length", "Accept-Ranges"]);
+    #[cfg(debug_assertions)]
+    let cors = cors.allowed_origin("http://localhost:2896").allowed_origin("http://127.0.0.1:2896");
+    cors
+}
+
+fn client(timeout: u64) -> Result<Client, String> {
+    Client::builder().redirect(crate::network_policy::redirects()).no_proxy().http1_only()
+        .redirect(crate::network_policy::redirects())
+        .gzip(false).brotli(false).no_deflate()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(timeout)).build()
+        .map_err(|_| "Cannot initialize playback client".to_string())
+}
 
 #[derive(Deserialize)]
-struct ImageQuery {
-    url: String,
-}
-
-fn is_bilibili_image_url(url: &str) -> bool {
-    url.contains("hdslb.com")
-        || url.contains("bilibili.com")
-        || url.contains("bilivideo.com")
-        || url.contains("bilivideo.cn")
-}
-
-fn is_huya_image_url(url: &str) -> bool {
-    url.contains("huya.com")
-        || url.contains("huyaimg.com")
-        || url.contains("msstatic.com")
-        || url.contains("hycdn.cn")
-        || url.contains("hyext.com")
-}
-
-fn is_douyin_image_url(url: &str) -> bool {
-    url.contains("douyin") || url.contains("douyinpic.com")
-}
-
-fn wait_for_local_server(port: u16) -> Result<(), String> {
-    let address: SocketAddr = format!("{}:{}", LOCAL_PROXY_HOST, port)
-        .parse()
-        .map_err(|error| format!("Invalid proxy address {}:{}: {}", LOCAL_PROXY_HOST, port, error))?;
-
-    for _ in 0..PROXY_STARTUP_RETRY_COUNT {
-        if TcpStream::connect_timeout(&address, Duration::from_millis(PROXY_STARTUP_RETRY_DELAY_MS)).is_ok() {
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(PROXY_STARTUP_RETRY_DELAY_MS));
-    }
-
-    Err(format!(
-        "Local proxy server did not become ready on {}:{} within {} ms.",
-        LOCAL_PROXY_HOST,
-        port,
-        PROXY_STARTUP_RETRY_COUNT as u64 * PROXY_STARTUP_RETRY_DELAY_MS
-    ))
-}
+struct ImageQuery { url: String }
 
 async fn image_proxy_handler(
+    request: HttpRequest,
     query: web::Query<ImageQuery>,
+    token: web::Data<String>,
     client: web::Data<Client>,
-) -> impl Responder {
-    let url = query.url.clone();
-    if url.is_empty() {
-        return HttpResponse::BadRequest().body("Missing url query parameter");
+) -> HttpResponse {
+    if request.match_info().get("token") != Some(token.as_str()) {
+        return HttpResponse::Forbidden().finish();
     }
-
-    let mut req = client
-        .get(&url)
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        )
-        .header(
-            "Accept",
-            "image/avif,image/webp,image/apng,image/*;q=0.8,*/*;q=0.5",
-        );
-
-    let upstream_platform = if is_bilibili_image_url(&url) {
-        req = req
-            .header("Referer", "https://live.bilibili.com/")
-            .header("Origin", "https://live.bilibili.com");
-        "bilibili"
-    } else if is_huya_image_url(&url) {
-        req = req
-            .header("Referer", "https://www.huya.com/")
-            .header("Origin", "https://www.huya.com");
-        "huya"
-    } else if is_douyin_image_url(&url) {
-        req = req.header("Referer", "https://www.douyin.com/");
-        "douyin"
-    } else {
-        "generic"
+    let Ok(url) = reqwest::Url::parse(&query.url) else {
+        return HttpResponse::BadRequest().finish();
     };
-
-    println!(
-        "[Rust/proxy.rs image] Forwarding {} image request: {}",
-        upstream_platform, url
-    );
-
-    match req.send().await {
-        Ok(upstream_response) => {
-            let content_type = upstream_response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("application/octet-stream")
-                .to_string();
-
-            // 为避免 Windows 下 chunked 传输的 Early-EOF，改为一次性读取 bytes 并返回
-            if upstream_response.status().is_success() {
-                match upstream_response.bytes().await {
-                    Ok(bytes) => HttpResponse::Ok()
-                        .content_type(content_type)
-                        .insert_header(("Content-Length", bytes.len().to_string()))
-                        .insert_header(("Cache-Control", "no-store"))
-                        .body(bytes),
-                    Err(e) => {
-                        eprintln!(
-                            "[Rust/proxy.rs image] Failed to read {} image bytes from {}: {}",
-                            upstream_platform, url, e
-                        );
-                        HttpResponse::InternalServerError()
-                            .body(format!("Failed to read image bytes: {}", e))
-                    }
-                }
-            } else {
-                let status_from_reqwest = upstream_response.status();
-                let error_text = upstream_response
-                    .text()
-                    .await
-                    .unwrap_or_else(|e| format!("Failed to read error body from upstream: {}", e));
-                eprintln!(
-                    "[Rust/proxy.rs image] Upstream {} image request to {} failed with status: {}. Body: {}",
-                    upstream_platform, url, status_from_reqwest, error_text
-                );
-                let actix_status_code =
-                    actix_web::http::StatusCode::from_u16(status_from_reqwest.as_u16())
-                        .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
-
-                HttpResponse::build(actix_status_code).body(format!(
-                    "Error fetching IMAGE from upstream (reqwest): {}. Status: {}. Details: {}",
-                    url, status_from_reqwest, error_text
-                ))
-            }
-        }
-        Err(e) => {
-            eprintln!(
-                "[Rust/proxy.rs image] Failed to send {} image request to upstream {}: {}",
-                upstream_platform, url, e
-            );
-            HttpResponse::InternalServerError()
-                .body(format!("Error connecting to upstream IMAGE {}: {}", url, e))
+    let Some(platform) = crate::network_policy::image_platform(&url) else {
+        return HttpResponse::Forbidden().finish();
+    };
+    let referer = match platform {
+        "bilibili" => "https://live.bilibili.com/",
+        "huya" => "https://www.huya.com/",
+        "douyin" => "https://www.douyin.com/",
+        _ => "https://www.douyu.com/",
+    };
+    let Ok(mut response) = client.get(url).header("Referer", referer)
+        .header("User-Agent", crate::platforms::common::http_client::DEFAULT_USER_AGENT)
+        .send().await else { return HttpResponse::BadGateway().finish(); };
+    if !response.status().is_success() { return HttpResponse::BadGateway().finish(); }
+    let content_type = response.headers().get("Content-Type")
+        .and_then(|value| value.to_str().ok()).unwrap_or("").to_string();
+    if !content_type.starts_with("image/") { return HttpResponse::BadGateway().finish(); }
+    let mut bytes = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) if bytes.len() + chunk.len() <= 8 * 1024 * 1024 => bytes.extend_from_slice(&chunk),
+            Ok(None) => break,
+            _ => return HttpResponse::BadGateway().finish(),
         }
     }
-}
-
-// Your actual proxy logic - this is a simplified placeholder
-async fn flv_proxy_handler(
-    _req: HttpRequest,
-    stream_url_store: web::Data<StreamUrlStore>,
-    client: web::Data<Client>,
-) -> impl Responder {
-    let url = stream_url_store.url.lock().unwrap().clone();
-    if url.is_empty() {
-        return HttpResponse::NotFound().body("Stream URL is not set or empty.");
-    }
-
-    println!(
-        "[Rust/proxy.rs handler] Incoming FLV proxy request -> {}",
-        url
-    );
-
-    let mut req = client
-        .get(&url)
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        )
-        .header("Accept", "video/x-flv,application/octet-stream,*/*")
-        .header("Range", "bytes=0-")
-        .header("Connection", "keep-alive");
-
-    // 如果是虎牙域名，添加必要的 Referer/Origin 头
-    if url.contains("huya.com") || url.contains("hy-cdn.com") || url.contains("huyaimg.com") {
-        req = req
-            .header("Referer", "https://www.huya.com/")
-            .header("Origin", "https://www.huya.com");
-    }
-    if url.contains("douyu.com") || url.contains("douyucdn.cn") || url.contains("douyuimg.com") {
-        req = req
-            .header("Referer", "https://www.douyu.com/")
-            .header("Origin", "https://www.douyu.com");
-    }
-    // 如果是B站域名，添加必要的 Referer 头
-    if url.contains("bilivideo") || url.contains("bilibili.com") || url.contains("hdslb.com") {
-        req = req.header("Referer", "https://live.bilibili.com/");
-    }
-
-    match req.send().await {
-        Ok(upstream_response) => {
-            if upstream_response.status().is_success() {
-                let mut response_builder = HttpResponse::Ok();
-                response_builder
-                    .content_type("video/x-flv")
-                    .insert_header(("Connection", "keep-alive"))
-                    .insert_header(("Cache-Control", "no-store"))
-                    .insert_header(("Accept-Ranges", "bytes"));
-
-                let byte_stream = upstream_response.bytes_stream().map_err(|e| {
-                    eprintln!(
-                        "[Rust/proxy.rs handler] Error reading bytes from upstream: {}",
-                        e
-                    );
-                    actix_web::error::ErrorInternalServerError(format!(
-                        "Upstream stream error: {}",
-                        e
-                    ))
-                });
-
-                response_builder.streaming(byte_stream)
-            } else {
-                let status_from_reqwest = upstream_response.status(); // Renamed for clarity
-                let error_text = upstream_response
-                    .text()
-                    .await
-                    .unwrap_or_else(|e| format!("Failed to read error body from upstream: {}", e));
-                eprintln!(
-                    "[Rust/proxy.rs handler] Upstream request to {} failed with status: {}. Body: {}",
-                    url, status_from_reqwest, error_text
-                );
-                // Convert reqwest::StatusCode to actix_web::http::StatusCode
-                let actix_status_code =
-                    actix_web::http::StatusCode::from_u16(status_from_reqwest.as_u16())
-                        .unwrap_or(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR);
-
-                HttpResponse::build(actix_status_code).body(format!(
-                    "Error fetching FLV stream from upstream (reqwest): {}. Status: {}. Details: {}",
-                    url, status_from_reqwest, error_text
-                ))
-            }
-        }
-        Err(e) => {
-            eprintln!(
-                "[Rust/proxy.rs handler] Failed to send request to upstream {} with reqwest: {}",
-                url, e
-            );
-            HttpResponse::InternalServerError().body(format!(
-                "Error connecting to upstream FLV stream {} with reqwest: {}",
-                url, e
-            ))
-        }
-    }
+    HttpResponse::Ok().content_type(content_type)
+        .insert_header(("Cache-Control", "no-store"))
+        .insert_header(("X-Content-Type-Options", "nosniff")).body(bytes)
 }
 
 #[tauri::command]
 pub async fn start_proxy(
-    _app_handle: AppHandle,
     server_handle_state: State<'_, ProxyServerHandle>,
-    stream_url_store: State<'_, StreamUrlStore>,
+    stream_url_store: State<'_, crate::StreamUrlStore>,
 ) -> Result<String, String> {
-    let port = find_free_port().await;
-    let current_stream_url = stream_url_store.url.lock().unwrap().clone();
-
-    if current_stream_url.is_empty() {
-        return Err("Stream URL is not set in store. Cannot start proxy.".to_string());
-    }
-
-    // stream_url_data_for_actix can be created once and cloned, as StreamUrlStore is Arc based and Send + Sync
-    let stream_url_data_for_actix = web::Data::new(stream_url_store.inner().clone());
-    // REMOVED: let awc_client_for_actix = web::Data::new(Client::default());
-
-    // Ensure MutexGuard is dropped before .await
-    let existing_handle_to_stop = { server_handle_state.0.lock().unwrap().take() };
-    if let Some(existing_handle) = existing_handle_to_stop {
-        existing_handle.stop(false).await;
-    }
-
-    let server = match HttpServer::new(move || {
-        let app_data_stream_url = stream_url_data_for_actix.clone();
-        // Create reqwest::Client inside the closure for each worker thread (for images)
-        let app_data_reqwest_client = web::Data::new(
-            Client::builder()
-                .no_proxy()
-                .http1_only()
-                .gzip(false)
-                .brotli(false)
-                .no_deflate()
-                .pool_idle_timeout(None)
-                .pool_max_idle_per_host(4)
-                .tcp_keepalive(Duration::from_secs(60))
-                .timeout(Duration::from_secs(7200))
-                .build()
-                .expect("failed to build client"),
-        );
-        App::new()
-            .app_data(app_data_stream_url)
-            .app_data(app_data_reqwest_client)
-            .wrap(actix_cors::Cors::permissive())
-            .route("/live.flv", web::get().to(flv_proxy_handler))
-            .route("/image", web::get().to(image_proxy_handler))
-    })
-    .keep_alive(Duration::from_secs(120))
-    .bind((LOCAL_PROXY_HOST, port))
-    {
-        Ok(srv) => srv,
-        Err(e) => {
-            let err_msg = format!(
-                "[Rust/proxy.rs] Failed to bind server to port {}: {}",
-                port, e
-            );
-            eprintln!("{}", err_msg);
-            return Err(err_msg);
-        }
-    }
-    .run();
-
-    let server_handle_for_state = server.handle();
-    *server_handle_state.0.lock().unwrap() = Some(server_handle_for_state);
-
-    // Use tauri::async_runtime::spawn directly
-    tauri::async_runtime::spawn(async move {
-        if let Err(e) = server.await {
-            eprintln!("[Rust/proxy.rs] Proxy server run error: {}", e);
-        } else {
-            println!("[Rust/proxy.rs] Proxy server on port {} shut down.", port);
-        }
-    });
-
-    wait_for_local_server(port)
-        .map_err(|error| format!("[Rust/proxy.rs] Stream proxy startup timeout: {}", error))?;
-
-    let proxy_url = format!("http://{}:{}/live.flv", LOCAL_PROXY_HOST, port);
-    Ok(proxy_url)
+    let source = stream_url_store.source.lock().map_err(|_| "Playback state unavailable")?.clone();
+    let url = reqwest::Url::parse(&source.url).map_err(|_| "Invalid playback URL")?;
+    if crate::network_policy::stream_platform(&url).is_none() { return Err("Unsupported playback host".into()); }
+    let previous = server_handle_state.0.lock().map_err(|_| "Playback state unavailable")?.take();
+    if let Some(previous) = previous { previous.stop(false).await; }
+    let session = web::Data::new(crate::stream_proxy::StreamSession::new(source));
+    let root = session.root_path();
+    let client = web::Data::new(client(7200)?);
+    let server = HttpServer::new(move || App::new().app_data(session.clone()).app_data(client.clone())
+        .wrap(cors())
+        .route("/live.flv", web::get().to(crate::stream_proxy::forward_stream))
+        .route("/live.m3u8", web::get().to(crate::stream_proxy::forward_stream))
+        .route("/resource", web::get().to(crate::stream_proxy::forward_stream)))
+        .workers(1).bind(("127.0.0.1", 0)).map_err(|_| "Cannot bind playback service")?;
+    let port = server.addrs()[0].port();
+    let server = server.run();
+    *server_handle_state.0.lock().map_err(|_| "Playback state unavailable")? = Some(server.handle());
+    tauri::async_runtime::spawn(server);
+    Ok(format!("http://127.0.0.1:{port}{root}"))
 }
 
 #[tauri::command]
-pub async fn start_static_proxy_server(
-    _app_handle: AppHandle,
-    stream_url_store: State<'_, StreamUrlStore>,
-) -> Result<String, String> {
-    // Use a dedicated port for static image proxy to avoid interfering with FLV stream proxy
-    let port = STATIC_PROXY_PORT;
-
-    // If the server is already running, just return the base URL (idempotent behavior)
-    if TcpStream::connect((LOCAL_PROXY_HOST, port)).is_ok() {
-        return Ok(format!("http://{}:{}", LOCAL_PROXY_HOST, port));
-    }
-
-    let stream_url_data_for_actix = web::Data::new(stream_url_store.inner().clone());
-
-    let server = match HttpServer::new(move || {
-        let app_data_stream_url = stream_url_data_for_actix.clone();
-        let app_data_reqwest_client = web::Data::new(
-            Client::builder()
-                .no_proxy()
-                .http1_only()
-                .gzip(false)
-                .brotli(false)
-                .no_deflate()
-                .pool_idle_timeout(None)
-                .pool_max_idle_per_host(4)
-                .tcp_keepalive(Duration::from_secs(60))
-                .timeout(Duration::from_secs(7200))
-                .build()
-                .expect("failed to build client"),
-        );
-        App::new()
-            .app_data(app_data_stream_url)
-            .app_data(app_data_reqwest_client)
-            .wrap(actix_cors::Cors::permissive())
-            .route("/live.flv", web::get().to(flv_proxy_handler))
-            .route("/image", web::get().to(image_proxy_handler))
-    })
-    .keep_alive(Duration::from_secs(120))
-    .bind((LOCAL_PROXY_HOST, port))
-    {
-        Ok(srv) => srv,
-        Err(e) => {
-            // If address already in use, assume server is running and return OK base URL
-            if e.kind() == ErrorKind::AddrInUse {
-                eprintln!(
-                    "[Rust/proxy.rs] Port {} already in use; assuming static proxy running.",
-                    port
-                );
-                wait_for_local_server(port).map_err(|wait_error| {
-                    format!(
-                        "[Rust/proxy.rs] Static proxy port {} was already in use, but readiness check failed: {}",
-                        port, wait_error
-                    )
-                })?;
-                return Ok(format!("http://{}:{}", LOCAL_PROXY_HOST, port));
-            }
-            let err_msg = format!(
-                "[Rust/proxy.rs] Failed to bind server to port {}: {}",
-                port, e
-            );
-            eprintln!("{}", err_msg);
-            return Err(err_msg);
-        }
-    }
-    .run();
-
-    // Do NOT overwrite the main proxy server handle; run static proxy independently
-
-    tauri::async_runtime::spawn(async move {
-        if let Err(e) = server.await {
-            eprintln!("[Rust/proxy.rs] Proxy server run error: {}", e);
-        } else {
-            println!("[Rust/proxy.rs] Proxy server on port {} shut down.", port);
-        }
-    });
-
-    wait_for_local_server(port)
-        .map_err(|error| format!("[Rust/proxy.rs] Static proxy startup timeout: {}", error))?;
-
-    Ok(format!("http://{}:{}", LOCAL_PROXY_HOST, port))
+pub async fn start_static_proxy_server() -> Result<String, String> {
+    let mut state = STATIC_SERVER.lock().await;
+    if let Some((_, base)) = state.as_ref() { return Ok(base.clone()); }
+    let token = session_id();
+    let session = web::Data::new(token.clone());
+    let client = web::Data::new(client(20)?);
+    let server = HttpServer::new(move || App::new().app_data(session.clone()).app_data(client.clone())
+        .wrap(cors()).route("/{token}/image", web::get().to(image_proxy_handler)))
+        .workers(1).bind(("127.0.0.1", 0)).map_err(|_| "Cannot bind image service")?;
+    let base = format!("http://127.0.0.1:{}/{token}", server.addrs()[0].port());
+    let server = server.run();
+    *state = Some((server.handle(), base.clone()));
+    tauri::async_runtime::spawn(server);
+    Ok(base)
 }
 
 #[tauri::command]
-pub async fn stop_proxy(server_handle_state: State<'_, ProxyServerHandle>) -> Result<(), String> {
-    // Ensure MutexGuard is dropped before .await
-    let handle_to_stop = { server_handle_state.0.lock().unwrap().take() };
-
-    if let Some(handle) = handle_to_stop {
-        handle.stop(false).await; // Changed to non-graceful shutdown
-        println!("[Rust/proxy.rs] stop_proxy: Initiated non-graceful shutdown.");
-    } else {
-        println!("[Rust/proxy.rs] stop_proxy command: No proxy server was running or handle already taken.");
-    }
+pub async fn stop_proxy(
+    server_handle_state: State<'_, ProxyServerHandle>,
+    stream_url_store: State<'_, crate::StreamUrlStore>,
+) -> Result<(), String> {
+    *stream_url_store.source.lock().map_err(|_| "Playback state unavailable")? = crate::StreamSource::default();
+    let previous = server_handle_state.0.lock().map_err(|_| "Playback state unavailable")?.take();
+    if let Some(previous) = previous { previous.stop(false).await; }
     Ok(())
 }

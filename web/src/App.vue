@@ -48,7 +48,7 @@
           @unfollow="handleUnfollowStore"
           @fullscreen-change="handleFullscreenChange"
         >
-          <keep-alive :include="['CustomHomeView', 'DouyuHomeView', 'DouyinHomeView', 'HuyaHomeView', 'BilibiliHomeView', 'CustomM3u8HomeView']">
+          <keep-alive :include="['CustomHomeView', 'DouyuHomeView', 'DouyinHomeView', 'HuyaHomeView', 'BilibiliHomeView']">
             <component :is="Component" ref="activeRouteComponentRef" :key="route.fullPath" />
           </keep-alive>
         </router-view>
@@ -118,20 +118,19 @@ import { createPortableConfigPayload, parsePortableConfigPayload, replacePortabl
 import { RELEASES_PAGE, type LatestReleaseInfo } from './services/updateChecker';
 import { useThemeStore } from './stores/theme';
 import { useFollowStore } from './store/followStore';
-import { useCustomM3u8Store } from './store/customM3u8Store';
 import type { Platform as UiPlatform } from './layout/types';
 import { Platform } from './platforms/common/types';
 import type { FollowedStreamer } from './platforms/common/types';
 import { copyTextToClipboard, openExternal } from './runtime/host';
 import { canUseInAppUpdate, downloadLatestReleaseApk, ensureInstallPermission, fallbackToReleasesPage, fetchLatestReleaseInfo, installDownloadedApk } from './runtime/updateHost';
 import './styles/global.css';
+import './styles/ui-polish.css';
 
 const router = useRouter();
 const route = useRoute();
 const followStore = useFollowStore();
-const customM3u8Store = useCustomM3u8Store();
 const themeStore = useThemeStore();
-customM3u8Store.ensureLoaded();
+localStorage.removeItem('dtv_custom_m3u8_sources_v1');
 
 const isSearchSheetOpen = ref(false);
 const isFollowsSheetOpen = ref(false);
@@ -195,7 +194,6 @@ const updateConfirmMessage = computed(() => {
 const routePlatform = computed<UiPlatform>(() => {
   const name = route.name as string | undefined;
   const path = route.path;
-  if (name === 'CustomM3u8Home' || name === 'customM3u8Player' || path.startsWith('/custom-m3u8')) return 'custom-m3u8';
   if (name === 'CustomHome' || path.startsWith('/custom')) return 'custom';
   if (name === 'douyinPlayer' || name === 'DouyinHome' || path.startsWith('/douyin')) return 'douyin';
   if (name === 'huyaPlayer' || name === 'HuyaHome' || path.startsWith('/huya')) return 'huya';
@@ -209,7 +207,7 @@ const followedStreamers = computed<FollowedStreamer[]>(() => followStore.getFoll
 
 const isPlayerRoute = computed(() => {
   const name = route.name as string | undefined;
-  return ['douyuPlayer', 'douyinPlayer', 'huyaPlayer', 'bilibiliPlayer', 'customM3u8Player'].includes(name || '');
+  return ['douyuPlayer', 'douyinPlayer', 'huyaPlayer', 'bilibiliPlayer'].includes(name || '');
 });
 const isHomeRoute = computed(() => {
   const name = route.name as string | undefined;
@@ -231,8 +229,6 @@ const subtitle = computed(() => {
       return '快手直播，补齐 Android 端入口';
     case 'neteasecc':
       return '网易 CC，分类与播放统一接入';
-    case 'custom-m3u8':
-      return '自定义 M3U8 源，独立管理与播放';
     case 'custom':
       return '订阅聚合，回到上次位置';
     default:
@@ -251,8 +247,6 @@ const platformToHomeRoute = (platform: UiPlatform) => {
   switch (platform) {
     case 'custom':
       return { name: 'CustomHome' };
-    case 'custom-m3u8':
-      return { name: 'CustomM3u8Home' };
     case 'douyin':
       return { name: 'DouyinHome' };
     case 'huya':
@@ -276,8 +270,6 @@ const pushPlayerRoute = (platform: Platform, roomId: string) => {
     target = { name: 'huyaPlayer', params: { roomId } };
   } else if (platform === Platform.BILIBILI) {
     target = { name: 'bilibiliPlayer', params: { roomId } };
-  } else if (platform === Platform.CUSTOM_M3U8) {
-    target = { name: 'customM3u8Player', params: { encodedId: encodeURIComponent(roomId) } };
   } else {
     target = { name: 'douyuPlayer', params: { roomId } };
   }
@@ -503,7 +495,7 @@ const handleExportConfig = async () => {
     await copyTextToClipboard(JSON.stringify(payload));
     configStatus.value = { tone: 'success', text: '已导出所有配置至粘贴板！' };
   } catch (error) {
-    console.error('[App] Export config failed:', error);
+    console.error('Diagnostic: App.vue:498 (details omitted)');
     configStatus.value = { tone: 'error', text: '配置导出失败，请稍后重试。' };
   } finally {
     isExportingConfig.value = false;
@@ -527,7 +519,7 @@ const handleConfirmImport = (rawText: string) => {
     showImportDialog.value = false;
     window.setTimeout(() => window.location.reload(), 360);
   } catch (error) {
-    console.error('[App] Import config failed:', error);
+    console.error('Diagnostic: App.vue:522 (details omitted)');
     configStatus.value = { tone: 'error', text: '导入失败！' };
   }
 };
@@ -564,7 +556,7 @@ const handleCheckUpdate = async () => {
     pendingUpdateInfo.value = result;
     updateMessage.value = '发现新版本 v' + result.latestVersion + '。';
   } catch (error: unknown) {
-    console.error('[App] Update check failed:', error);
+    console.error('Diagnostic: App.vue:559 (details omitted)');
     updateMessage.value = '检查更新失败，请稍后重试。';
   } finally {
     isCheckingUpdate.value = false;
@@ -605,7 +597,7 @@ const handleConfirmUpdate = async () => {
     }
     updateMessage.value = '下载完成，正在打开安装程序...';
   } catch (error: unknown) {
-    console.error('[App] Update download failed:', error);
+    console.error('Diagnostic: App.vue:600 (details omitted)');
     updateMessage.value = '更新失败，请稍后重试。';
   } finally {
     isDownloadingUpdate.value = false;
@@ -616,7 +608,7 @@ onMounted(async () => {
   try {
     appVersion.value = await getVersion();
   } catch (error) {
-    console.warn('[App] Failed to resolve app version:', error);
+    console.warn('Diagnostic: App.vue:611 (details omitted)');
   }
 
   const shell = routeShellRef.value;
@@ -792,8 +784,8 @@ onBeforeUnmount(() => {
   padding: max(12px, env(safe-area-inset-top)) 14px 10px;
   background: var(--mobile-topbar-bg, rgba(2, 6, 23, 0.86));
   color: var(--mobile-topbar-text, var(--text-primary));
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border-bottom: 1px solid var(--mobile-topbar-border, rgba(148, 163, 184, 0.12));
 }
 

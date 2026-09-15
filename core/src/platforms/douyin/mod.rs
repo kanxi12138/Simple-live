@@ -4,6 +4,7 @@ pub mod douyin_streamer_detail;
 pub mod douyin_streamer_info;
 pub mod douyin_streamer_list;
 pub mod search;
+pub mod account_search;
 pub mod models;
 pub mod web_api;
 pub mod a_bogus;
@@ -16,3 +17,4 @@ pub use self::douyin_streamer_detail::{
 pub use self::douyin_streamer_info::fetch_douyin_streamer_info;
 pub use self::douyin_streamer_list::fetch_douyin_partition_rooms;
 pub use self::search::search_douyin_live_rooms;
+mod room_page;

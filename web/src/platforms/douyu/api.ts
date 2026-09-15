@@ -1,9 +1,9 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../services/platformInvoke';
 import type { DouyuRoomInfo, DouyuRawCategoriesResponseData } from './types';
 
 export async function fetchDouyuRoomInfo(roomId: string): Promise<DouyuRoomInfo> {
   if (!roomId) {
-    console.warn('fetchDouyuRoomInfo: roomId is not provided.');
+    console.warn('Diagnostic: api.ts:6 (details omitted)');
     return Promise.reject('Room ID is required.');
   }
   try {
@@ -15,7 +15,7 @@ export async function fetchDouyuRoomInfo(roomId: string): Promise<DouyuRoomInfo>
       if (('error' in response && response.error !== 0) || ('code' in response && response.code !== 0)) {
         const errorCode = response.error !== undefined ? response.error : response.code;
         const errorMessage = `Douyu API returned an error for room ${roomId}: (code ${errorCode}) ${response.msg || response.message || 'Unknown API error'}`;
-        console.error(errorMessage, response);
+        console.error('Diagnostic: api.ts:18 (details omitted)');
         throw new Error(errorMessage);
       }
 
@@ -32,7 +32,7 @@ export async function fetchDouyuRoomInfo(roomId: string): Promise<DouyuRoomInfo>
       } else {
         // If none of the above, the structure is unexpected.
         const errorMessage = `Could not find room data in Douyu API response for room ${roomId}. Expected 'data' or 'room' key, or direct room object.`;
-        console.error(errorMessage, response);
+        console.error('Diagnostic: api.ts:35 (details omitted)');
         throw new Error(errorMessage);
       }
       
@@ -42,18 +42,18 @@ export async function fetchDouyuRoomInfo(roomId: string): Promise<DouyuRoomInfo>
         return actualRoomData;
       } else {
         const errorMessage = `Extracted room data is invalid or missing room_id for room ${roomId}.`;
-        console.error(errorMessage, 'Extracted:', actualRoomData, 'Full Response:', response);
+        console.error('Diagnostic: api.ts:45 (details omitted)');
         throw new Error(errorMessage);
       }
 
     } else {
       const errorMessage = `Unexpected or non-object response from fetch_douyu_room_info for room ${roomId}.`;
-      console.error(errorMessage, response);
+      console.error('Diagnostic: api.ts:51 (details omitted)');
       throw new Error(errorMessage);
     }
   } catch (error) {
     // This catches errors from invoke itself (e.g., Rust command panicked) or errors thrown above.
-    console.error(`Error in fetchDouyuRoomInfo for room ${roomId}:`, error);
+    console.error('Diagnostic: api.ts:56 (details omitted)');
     // Ensure the error is an Error object for consistent handling upstream
     if (error instanceof Error) {
       throw error;
@@ -64,13 +64,13 @@ export async function fetchDouyuRoomInfo(roomId: string): Promise<DouyuRoomInfo>
 
 export async function startDouyuDanmakuListener(roomId: string): Promise<void> {
   if (!roomId) {
-    console.warn('startDouyuDanmakuListener: roomId is not provided.');
+    console.warn('Diagnostic: api.ts:67 (details omitted)');
     return Promise.reject('Room ID is required for Danmaku listener.');
   }
   try {
     await invoke<void>('start_danmaku_listener', { roomId });
   } catch (error) {
-    console.error(`Error starting Douyu danmaku listener for ${roomId}:`, error);
+    console.error('Diagnostic: api.ts:73 (details omitted)');
     throw error; // Re-throw to be handled by the caller
   }
 }
@@ -78,19 +78,19 @@ export async function startDouyuDanmakuListener(roomId: string): Promise<void> {
 
 export async function fetchDouyuStreamUrlRaw(roomId: string): Promise<string> {
   if (!roomId) {
-    console.warn('[Douyu API] fetchDouyuStreamUrlRaw: roomId is not provided.');
+    console.warn('Diagnostic: api.ts:81 (details omitted)');
     return Promise.reject('Room ID is required to fetch stream URL.');
   }
   try {
     // Assuming get_stream_url_cmd returns a simple string URL
     const url = await invoke<string>('get_stream_url_cmd', { roomId }); 
     if (!url) {
-      console.error(`[Douyu API] fetchDouyuStreamUrlRaw: Received empty URL for room ${roomId}`);
+      console.error('Diagnostic: api.ts:88 (details omitted)');
       return Promise.reject('Empty stream URL received');
     }
     return url;
   } catch (error) {
-    console.error(`[Douyu API] Error fetching Douyu stream URL for ${roomId}:`, error);
+    console.error('Diagnostic: api.ts:93 (details omitted)');
     throw error;
   }
 }
@@ -102,12 +102,12 @@ export async function fetchDouyuCategoriesRaw(): Promise<DouyuRawCategoriesRespo
   try {
     const rawData = await invoke<DouyuRawCategoriesResponseData>('fetch_douyu_categories_cmd');
     if (typeof rawData !== 'object' || rawData === null) {
-        console.error('[Douyu API] fetchDouyuCategoriesRaw: Received non-object data:', rawData);
+        console.error('Diagnostic: api.ts:105 (details omitted)');
         throw new Error('Invalid category data received from backend');
     }
     return rawData; // This should be DouyuRawCategoriesResponseData (containing category_groups)
   } catch (error) {
-    console.error('[Douyu API] Error fetching Douyu categories raw:', error);
+    console.error('Diagnostic: api.ts:110 (details omitted)');
     if (typeof error === 'string') {
         throw new Error(error);
     }

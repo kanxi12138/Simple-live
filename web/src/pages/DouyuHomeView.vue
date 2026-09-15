@@ -32,7 +32,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '../services/platformInvoke'
 import CategoryList from '../components/DouyuCategory/index.vue'
 import CommonStreamerList from '../components/CommonStreamerList/index.vue'
 import type { CategorySelectedEvent } from '../components/DouyuCategory/types'
@@ -121,7 +121,7 @@ const fetchDefaultCategory = async () => {
       selectedCategoryInfo.value = null
     }
   } catch (error) {
-    console.error('[DouyuHomeView] Failed to load default category:', error)
+    console.error('Diagnostic: DouyuHomeView.vue:124 (details omitted)')
     selectedCategoryInfo.value = null
   } finally {
     isLoadingDefaultCategory.value = false
