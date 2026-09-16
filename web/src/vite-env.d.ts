@@ -11,7 +11,7 @@ interface Window {
     log(level: string, message: string): void;
   };
   DTVUpdate?: {
-    installApk(filePath: string): void;
+    installApk(filePath: string): string;
     canRequestPackageInstalls(): boolean;
     openUnknownAppSourcesSettings(): void;
   };

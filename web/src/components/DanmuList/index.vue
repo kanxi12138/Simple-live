@@ -18,6 +18,7 @@
               @keydown.enter.prevent="addKeyword"
             />
           </div>
+          <p v-if="filterError" role="alert">{{ filterError }}</p>
           <div class="panel-list">
             <div v-if="blockedKeywords.length === 0" class="panel-empty">暂无屏蔽词</div>
             <div v-for="(kw, i) in blockedKeywords" :key="`${kw}-${i}`" class="panel-item">
@@ -66,6 +67,7 @@
   
   <script setup lang="ts">
   import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
+  import { getBlockedKeywords, saveBlockedKeywords } from '../../services/blockedKeywords';
 
   interface DanmakuUIMessage {
     id?: string;
@@ -91,8 +93,8 @@ const pointerActive = ref(false);
 
 const showFilterPanel = ref(false);
 const keywordInput = ref('');
-const blockedKeywords = ref<string[]>([]);
-const BLOCK_KEYWORDS_STORAGE = 'danmu_block_keywords';
+const blockedKeywords = getBlockedKeywords();
+const filterError = ref('');
   
 const userColor = (nickname: string | undefined) => {
   if (!nickname || nickname.length === 0) {
@@ -200,7 +202,6 @@ watch(() => props.roomId, () => {
 onMounted(() => {
   window.addEventListener('pointerup', onGlobalPointerUp);
   window.addEventListener('pointercancel', onGlobalPointerUp);
-  loadBlockedKeywords();
   updateRenderedMessages();
 });
 
@@ -219,28 +220,9 @@ defineExpose({
   toggleFilterPanel,
 });
 
-const loadBlockedKeywords = () => {
-  if (typeof window === 'undefined') return;
-  try {
-    const raw = window.localStorage.getItem(BLOCK_KEYWORDS_STORAGE);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        blockedKeywords.value = parsed.filter((v) => typeof v === 'string' && v.trim().length > 0);
-      }
-    }
-  } catch (err) {
-    console.warn('Diagnostic: index.vue:233 (details omitted)');
-  }
-};
-
-const persistBlockedKeywords = () => {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(BLOCK_KEYWORDS_STORAGE, JSON.stringify(blockedKeywords.value));
-  } catch (err) {
-    console.warn('Diagnostic: index.vue:242 (details omitted)');
-  }
+const persistBlockedKeywords = (values: string[]) => {
+  try { saveBlockedKeywords(values); filterError.value = ''; }
+  catch { filterError.value = '屏蔽词保存失败，原设置已保留。'; }
 };
 
 const addKeyword = () => {
@@ -250,15 +232,13 @@ const addKeyword = () => {
     keywordInput.value = '';
     return;
   }
-  blockedKeywords.value = [...blockedKeywords.value, kw];
+  persistBlockedKeywords([...blockedKeywords.value, kw]);
   keywordInput.value = '';
-  persistBlockedKeywords();
 };
 
 const removeKeyword = (idx: number) => {
   if (idx < 0 || idx >= blockedKeywords.value.length) return;
-  blockedKeywords.value = blockedKeywords.value.filter((_, i) => i !== idx);
-  persistBlockedKeywords();
+  persistBlockedKeywords(blockedKeywords.value.filter((_, i) => i !== idx));
 };
 
 const filterBlockedMessages = (messages: DanmakuUIMessage[]) => {

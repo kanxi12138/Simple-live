@@ -10,7 +10,7 @@ let operations: Promise<unknown> = Promise.resolve();
  */
 export const queueStreamProxy = <Result>(operation: () => Promise<Result>): Promise<Result> => {
   const pending = operations.then(operation, operation);
-  operations = pending.catch(() => console.error('Diagnostic: playbackProxy.ts:13 (details omitted)'));
+  operations = pending.catch(() => undefined);
   return pending;
 };
 

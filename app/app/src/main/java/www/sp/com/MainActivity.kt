@@ -35,6 +35,17 @@ private const val HEARTBEAT_INTERVAL_MS = 45_000L
 private const val PACKET_HEADER_SIZE = 12
 private const val MIN_PACKET_BODY_SIZE = 9
 
+// Shared validation keeps APK identity checks independent of Android UI calls.
+internal fun validateUpdateIdentity(
+  archivePackage: String, installedPackage: String, archiveVersion: Long, installedVersion: Long,
+  versionName: String?, archiveSignatures: Set<String>?, installedSignatures: Set<String>?,
+): String {
+  if (archivePackage != installedPackage) return "更新安装失败：包名不匹配"
+  if (archiveVersion < installedVersion || versionName.isNullOrBlank()) return "更新安装失败：版本不兼容"
+  if (archiveSignatures.isNullOrEmpty() || archiveSignatures != installedSignatures) return "更新安装失败：签名不兼容"
+  return ""
+}
+
 class MainActivity : TauriActivity() {
   private var playerWebView: WebView? = null
   private var isImmersiveFullscreen = false
@@ -180,29 +191,47 @@ class MainActivity : TauriActivity() {
     }
 
     @JavascriptInterface
-    fun installApk(filePath: String) {
-      if (filePath.isBlank()) {
-        return
+    fun installApk(filePath: String): String {
+      try {
+        val apkFile = File(filePath).canonicalFile
+        val updatesDir = File(cacheDir, "updates").canonicalFile
+        if (apkFile.parentFile != updatesDir || apkFile.extension.lowercase() != "apk" || !apkFile.isFile) {
+          return "更新安装失败：文件不在更新缓存目录内"
+        }
+        @Suppress("DEPRECATION")
+        val archive = packageManager.getPackageArchiveInfo(apkFile.path, android.content.pm.PackageManager.GET_SIGNATURES)
+          ?: return "更新安装失败：APK 无效"
+        @Suppress("DEPRECATION")
+        val installed = packageManager.getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNATURES)
+        @Suppress("DEPRECATION")
+        val archiveVersion = if (Build.VERSION.SDK_INT >= 28) archive.longVersionCode else archive.versionCode.toLong()
+        @Suppress("DEPRECATION")
+        val installedVersion = if (Build.VERSION.SDK_INT >= 28) installed.longVersionCode else installed.versionCode.toLong()
+        @Suppress("DEPRECATION")
+        val archiveSignatures = archive.signatures?.map { it.toCharsString() }?.toSet()
+        @Suppress("DEPRECATION")
+        val installedSignatures = installed.signatures?.map { it.toCharsString() }?.toSet()
+        val identityError = validateUpdateIdentity(archive.packageName, packageName, archiveVersion,
+          installedVersion, archive.versionName, archiveSignatures, installedSignatures)
+        if (identityError.isNotEmpty()) return identityError
+
+        val apkUri = FileProvider.getUriForFile(
+          this@MainActivity,
+          "$packageName.fileprovider",
+          apkFile,
+        )
+
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+          setDataAndType(apkUri, "application/vnd.android.package-archive")
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        startActivity(installIntent)
+        return ""
+      } catch (_: Exception) {
+        return "更新安装失败：无法打开系统安装器"
       }
-
-      val apkFile = File(filePath)
-      if (!apkFile.exists() || !apkFile.isFile) {
-        return
-      }
-
-      val apkUri = FileProvider.getUriForFile(
-        this@MainActivity,
-        "$packageName.fileprovider",
-        apkFile,
-      )
-
-      val installIntent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(apkUri, "application/vnd.android.package-archive")
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-      }
-
-      startActivity(installIntent)
     }
   }
 

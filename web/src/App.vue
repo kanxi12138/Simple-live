@@ -114,6 +114,7 @@ import MobileFollowsSheet from './mobile/MobileFollowsSheet.vue';
 import MobileSearchSheet from './mobile/MobileSearchSheet.vue';
 import MobileSettingsSheet from './mobile/MobileSettingsSheet.vue';
 import MobileTopbar from './mobile/MobileTopbar.vue';
+import { diagnosticDetails } from './services/diagnostics';
 import { createPortableConfigPayload, parsePortableConfigPayload, replacePortableConfigEntries } from './services/configTransfer';
 import { RELEASES_PAGE, type LatestReleaseInfo } from './services/updateChecker';
 import { useThemeStore } from './stores/theme';
@@ -519,8 +520,8 @@ const handleConfirmImport = (rawText: string) => {
     showImportDialog.value = false;
     window.setTimeout(() => window.location.reload(), 360);
   } catch (error) {
-    console.error('Diagnostic: App.vue:522 (details omitted)');
-    configStatus.value = { tone: 'error', text: '导入失败！' };
+    console.error('配置导入失败', diagnosticDetails(error));
+    configStatus.value = { tone: 'error', text: error instanceof Error ? error.message : '配置导入失败。' };
   }
 };
 
@@ -556,7 +557,7 @@ const handleCheckUpdate = async () => {
     pendingUpdateInfo.value = result;
     updateMessage.value = '发现新版本 v' + result.latestVersion + '。';
   } catch (error: unknown) {
-    console.error('Diagnostic: App.vue:559 (details omitted)');
+    console.error('检查更新失败', diagnosticDetails(error));
     updateMessage.value = '检查更新失败，请稍后重试。';
   } finally {
     isCheckingUpdate.value = false;
@@ -597,8 +598,8 @@ const handleConfirmUpdate = async () => {
     }
     updateMessage.value = '下载完成，正在打开安装程序...';
   } catch (error: unknown) {
-    console.error('Diagnostic: App.vue:600 (details omitted)');
-    updateMessage.value = '更新失败，请稍后重试。';
+    console.error('更新下载或安装失败', diagnosticDetails(error));
+    updateMessage.value = typeof error === 'string' ? error : error instanceof Error ? error.message : '更新失败，请稍后重试。';
   } finally {
     isDownloadingUpdate.value = false;
   }

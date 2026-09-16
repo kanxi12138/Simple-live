@@ -9,7 +9,7 @@ export interface ApkDownloadResult {
 }
 
 interface AndroidUpdateBridge {
-  installApk(filePath: string): void;
+  installApk(filePath: string): string;
   canRequestPackageInstalls(): boolean;
   openUnknownAppSourcesSettings(): void;
 }
@@ -52,7 +52,8 @@ export const installDownloadedApk = (filePath: string): boolean => {
     return false;
   }
 
-  bridge.installApk(filePath);
+  const error = bridge.installApk(filePath);
+  if (error) throw new Error(error);
   return true;
 };
 
