@@ -11,7 +11,7 @@ powershell -ExecutionPolicy Bypass -File scripts/sync-core.ps1
 npm.cmd --prefix web run android:init
 ```
 
-初始化后，将保存工程 `app` 中的受版本控制源码和配置复制到 `web/src-tauri/gen/android` 的对应位置，保留初始化产生的文件。不要将生成工程整体反向覆盖保存工程。确保 MainActivity、DouyinLoginBridge、清单、Gradle 配置以及 `app/tauri.properties` 已应用，并且无 BackgroundPlaybackService 旧文件。
+`android:init` 完成后自动将 `app` 中 Git 跟踪的源码和配置应用到生成工程；已有生成工程执行 `npm.cmd --prefix web run android:apply`。同步不反向覆盖 `app`，不复制签名配置、JNI 或构建产物。
 
 将本机 SDK 配置及以下签名属性写入生成工程根目录的 `local.properties`，不要提交该文件或密钥：`release.keystore.path`、`release.keystore.storePassword`、`release.keystore.keyAlias`、`release.keystore.keyPassword`。使用已有 release keystore。
 
@@ -42,4 +42,4 @@ Pop-Location
 
 输出位于 `web/src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk`。使用 aapt 和 apksigner 核对包名 `www.sp.com`、版本 `5.2.2/5002002`、仅 arm64-v8a 及原 release 证书。安装时使用 `adb install -r`，签名不一致则停止，不卸载或清数据。
 
-APK、JNI、构建目录和本地配置不属于源码提交。本次源码整理不重新打包，不运行功能测试、Lint、格式化或性能测试。
+APK、JNI、构建目录和本地配置不属于源码提交。定向验证入口见 `docs/repair-validation.md`；不运行全仓 Lint 或直播实测。

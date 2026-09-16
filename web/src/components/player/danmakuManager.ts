@@ -1,3 +1,5 @@
+import { diagnosticDetails } from '../../services/diagnostics';
+import { getBlockedKeywords } from '../../services/blockedKeywords';
 import { listen } from '@tauri-apps/api/event';
 import type { Ref } from 'vue';
 
@@ -22,26 +24,7 @@ export interface DanmakuManagerContext {
   props: PlayerProps;
 }
 
-const BLOCK_KEYWORDS_STORAGE = 'danmu_block_keywords';
-
-const loadBlockedKeywords = (): string[] => {
-  if (typeof window === 'undefined') {
-    return [];
-  }
-  try {
-    const raw = window.localStorage.getItem(BLOCK_KEYWORDS_STORAGE);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((v) => typeof v === 'string')
-      .map((v) => v.trim().toLowerCase())
-      .filter((v) => v.length > 0);
-  } catch (err) {
-    console.warn('Diagnostic: danmakuManager.ts:41 (details omitted)');
-    return [];
-  }
-};
+const blockedKeywords = getBlockedKeywords();
 
 const isBlockedMessage = (message?: DanmakuMessage) => {
   if (!message || message.isSystem) {
@@ -49,7 +32,7 @@ const isBlockedMessage = (message?: DanmakuMessage) => {
   }
   const content = (message.content || '').toLowerCase();
   if (!content) return false;
-  const keywords = loadBlockedKeywords();
+  const keywords = blockedKeywords.value;
   if (!keywords.length) return false;
   return keywords.some((kw) => content.includes(kw));
 };
@@ -70,7 +53,7 @@ const startListener = async (
   ctx.isDanmakuListenerActive.value = true;
   const danmuOverlay = getDanmuOverlay();
   if (!danmuOverlay) {
-    console.warn('Diagnostic: danmakuManager.ts:73 (details omitted)');
+    console.warn('弹幕启动：覆盖层尚未就绪');
   }
 
   try {
@@ -138,11 +121,11 @@ const startListener = async (
       ctx.unlistenDanmakuFn.value = stopFn;
 
     } else {
-      console.warn('Diagnostic: danmakuManager.ts:141 (details omitted)');
+      console.warn('弹幕启动失败：监听器未创建');
       ctx.isDanmakuListenerActive.value = false;
     }
   } catch (error) {
-    console.error('Diagnostic: danmakuManager.ts:145 (details omitted)');
+    console.error('弹幕启动失败', diagnosticDetails(error));
     ctx.isDanmakuListenerActive.value = false;
 
     if (!ctx.isFullScreen.value) {
@@ -182,12 +165,12 @@ const stopListener = async (
       ctx.unlistenDanmakuFn.value = null;
     }
   } else if (ctx.unlistenDanmakuFn.value) {
-    console.warn('Diagnostic: danmakuManager.ts:185 (details omitted)');
+    console.warn('弹幕清理：平台缺失，执行本地清理');
     try {
       ctx.unlistenDanmakuFn.value();
       ctx.unlistenDanmakuFn.value = null;
     } catch (error) {
-      console.error('Diagnostic: danmakuManager.ts:190 (details omitted)');
+      console.error('弹幕清理失败', diagnosticDetails(error));
       ctx.unlistenDanmakuFn.value = null;
     }
   }

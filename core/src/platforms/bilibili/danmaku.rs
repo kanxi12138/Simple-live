@@ -31,7 +31,8 @@ fn cookie_value<'a>(cookie: &'a str, name: &str) -> Option<&'a str> {
         .find_map(|(key, value)| (key == name).then_some(value))
 }
 
-fn process_packets(data: &[u8], app: &tauri::AppHandle, room: &str) -> Result<()> {
+fn process_packets(data: &[u8], on_chat: &mut impl FnMut(&[u8]) -> Result<()>) -> Result<bool> {
+    let mut authenticated = false;
     let mut pending = vec![data.to_vec()];
     let mut decoded_bytes = data.len() as u64;
     while let Some(data) = pending.pop() {
@@ -57,15 +58,15 @@ fn process_packets(data: &[u8], app: &tauri::AppHandle, room: &str) -> Result<()
                 if decoded_bytes > MAX_PACKET { bail!("B站弹幕解压数据过大"); }
                 pending.push(decoded);
             } else if operation == AUTH_REPLY {
-                let response: Value = serde_json::from_slice(body)?;
-                if response["code"].as_i64() != Some(0) { bail!("B站弹幕认证失败: {}", response["code"]); }
-                app.emit("danmaku-status", json!({"room_id": room, "platform": "bilibili", "status": "ready"}))?;
+                let response: Value = serde_json::from_slice(body).context("B站认证响应格式无效")?;
+                if response["code"].as_i64() != Some(0) { bail!("B站弹幕认证失败: {}", response["code"].as_i64().context("B站认证结果缺少错误码")?); }
+                authenticated = true;
             } else if operation == CHAT {
-                emit_chat(body, app, room)?;
+                on_chat(body)?;
             }
         }
     }
-    Ok(())
+    Ok(authenticated)
 }
 
 fn emit_chat(body: &[u8], app: &tauri::AppHandle, room: &str) -> Result<()> {
@@ -102,6 +103,30 @@ fn chat_target(hostname: &str, port: u64) -> Result<reqwest::Url, &'static str> 
     Ok(target)
 }
 
+async fn connect_authenticated(target: &str, auth_packet: &[u8], deadline: std::time::Duration,
+    on_chat: &mut impl FnMut(&[u8]) -> Result<()>,
+) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>> {
+
+    let (mut socket, _) = tokio::time::timeout(deadline, connect_async(target))
+        .await.context("连接超时")?.map_err(|_| anyhow::anyhow!("连接失败"))?;
+    tokio::time::timeout(deadline, socket.send(Message::Binary(auth_packet.to_vec())))
+        .await.context("认证包发送超时")?.map_err(|_| anyhow::anyhow!("认证包发送失败"))?;
+    tokio::time::timeout(deadline, async {
+        loop {
+            match socket.next().await.context("认证前连接关闭")?.map_err(|_| anyhow::anyhow!("认证读取失败"))? {
+                Message::Binary(data) => {
+                    if process_packets(&data, on_chat)? { return Ok::<(), anyhow::Error>(()); }
+                }
+                Message::Ping(body) => socket.send(Message::Pong(body)).await.map_err(|_| anyhow::anyhow!("认证心跳失败"))?,
+                Message::Close(_) => bail!("认证前连接关闭"),
+                _ => {},
+            }
+        }
+    }).await.context("认证结果超时")??;
+    Ok::<_, anyhow::Error>(socket)
+
+}
+
 async fn run_listener(room: &str, cookie: Option<&str>, app: &tauri::AppHandle) -> Result<()> {
     let (client, cookie) = super::stream_url::runtime_client(cookie).await.context("B站弹幕 Cookie/buvid 初始化失败")?;
     let detail = super::stream_url::room_init(&client, room).await.context("B站弹幕房间解析失败")?;
@@ -123,6 +148,10 @@ async fn run_listener(room: &str, cookie: Option<&str>, app: &tauri::AppHandle) 
     let hosts = response["data"]["host_list"].as_array().context("B站 getDanmuInfo 未返回弹幕服务器")?;
     let mut connection = None;
     let mut failures = Vec::new();
+    let auth = json!({"uid": cookie_value(&cookie, "DedeUserID").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0),
+        "roomid": real_room, "protover": 3, "platform": "web", "type": 2,
+        "buvid": cookie_value(&cookie, "buvid3").context("B站缺少 buvid3")?, "key": token});
+    let auth_packet = packet(AUTH, &serde_json::to_vec(&auth)?);
     for host in hosts.iter().take(3) {
         let hostname = host["host"].as_str().unwrap_or_default();
         let port = host["wss_port"].as_u64().unwrap_or_default();
@@ -131,15 +160,17 @@ async fn run_listener(room: &str, cookie: Option<&str>, app: &tauri::AppHandle) 
             Err(reason) => {
                 // Do not log malformed raw host fields, which may contain URL credentials.
                 log::warn!("B站弹幕候选地址校验失败: port={port}, reason={reason}");
-                failures.push(reason);
+                failures.push(reason.to_string());
                 continue;
             }
         };
-        match connect_async(target.as_str()).await {
-            Ok((socket, _)) => { connection = Some(socket); break; }
-            Err(_) => {
+        let candidate = connect_authenticated(target.as_str(), &auth_packet, std::time::Duration::from_secs(10),
+            &mut |body| emit_chat(body, app, room)).await;
+        match candidate {
+            Ok(socket) => { connection = Some(socket); break; }
+            Err(error) => {
                 log::warn!("B站弹幕连接失败: host={}, port={port}", target.host_str().unwrap_or_default());
-                failures.push("连接失败");
+                failures.push(format!("{error:#}"));
             }
         }
     }
@@ -147,16 +178,13 @@ async fn run_listener(room: &str, cookie: Option<&str>, app: &tauri::AppHandle) 
         let reason = if failures.is_empty() { "无候选服务器".to_string() } else { failures.join("、") };
         format!("B站弹幕 WebSocket 服务器均不可用: {reason}")
     })?;
-    let auth = json!({"uid": cookie_value(&cookie, "DedeUserID").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0),
-        "roomid": real_room, "protover": 3, "platform": "web", "type": 2,
-        "buvid": cookie_value(&cookie, "buvid3").context("B站缺少 buvid3")?, "key": token});
-    socket.send(Message::Binary(packet(AUTH, &serde_json::to_vec(&auth)?))).await.context("B站弹幕认证包发送失败")?;
+    app.emit("danmaku-status", json!({"room_id": room, "platform": "bilibili", "status": "ready"}))?;
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
     loop {
         tokio::select! {
             _ = heartbeat.tick() => socket.send(Message::Binary(packet(HEARTBEAT, &[]))).await?,
             message = socket.next() => match message.context("B站弹幕连接已关闭")?? {
-                Message::Binary(data) => process_packets(&data, app, room)?,
+                Message::Binary(data) => { process_packets(&data, &mut |body| emit_chat(body, app, room))?; },
                 Message::Ping(body) => socket.send(Message::Pong(body)).await?,
                 Message::Close(_) => bail!("B站弹幕连接已关闭"),
                 _ => {},
@@ -181,10 +209,13 @@ pub async fn start_bilibili_danmaku_listener(
             _ = receiver.recv() => {},
             result = run_listener(&room, cookie.as_deref(), &app_handle) => {
                 if let Err(error) = result {
-                    log::error!("Diagnostic: danmaku.rs:137 (details omitted)");
+                    let message = error.to_string();
+                    let stage = ["初始化", "房间解析", "WBI", "getDanmuInfo", "WebSocket", "认证"]
+                        .into_iter().find(|stage| message.contains(stage)).unwrap_or("消息处理");
+                    log::error!("B站弹幕会话失败：阶段={stage}");
                     if let Err(_emit_error) = app_handle.emit("danmaku-status", json!({"room_id": room,
                         "platform": "bilibili", "status": "error", "message": format!("{error:#}")})) {
-                        log::error!("Diagnostic: danmaku.rs:140 (details omitted)");
+                        log::error!("B站弹幕状态事件发送失败");
                     }
                 }
             }
@@ -201,4 +232,63 @@ pub async fn stop_bilibili_danmaku_listener(
     let previous = state.0.lock().map_err(|error| error.to_string())?.take();
     if let Some(previous) = previous { let _ = previous.send(()).await; }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    async fn server(code: i64, delay: Duration, handshake: bool) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            if !handshake { tokio::time::sleep(delay).await; return; }
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let _ = socket.next().await;
+            tokio::time::sleep(delay).await;
+            let _ = socket.send(Message::Binary(packet(AUTH_REPLY, json!({"code": code}).to_string().as_bytes()))).await;
+            let _ = socket.next().await;
+        });
+        format!("ws://{address}/sub")
+    }
+
+    #[tokio::test]
+    async fn candidate_timeout_rejection_success_and_cancellation() {
+        let deadline = Duration::from_millis(40);
+        let auth = packet(AUTH, b"{}");
+        let candidates = [
+            server(0, Duration::from_millis(200), false).await,
+            server(-101, Duration::ZERO, true).await,
+            server(0, Duration::ZERO, true).await,
+        ];
+        let mut successful = 0;
+        let mut failures = Vec::new();
+        for candidate in candidates {
+            match connect_authenticated(&candidate, &auth, deadline, &mut |_| Ok(())).await {
+                Ok(_) => { successful += 1; break; }
+                Err(error) => failures.push(format!("{error:#}")),
+            }
+        }
+        assert_eq!(successful, 1);
+        assert!(failures[0].contains("连接超时"));
+        assert!(failures[1].contains("-101"));
+        let silent = server(0, Duration::from_millis(200), true).await;
+        let error = connect_authenticated(&silent, &auth, deadline, &mut |_| Ok(())).await.unwrap_err();
+        assert!(format!("{error:#}").contains("认证结果超时"));
+        let silent = server(0, Duration::from_millis(200), true).await;
+        assert!(tokio::time::timeout(Duration::from_millis(10),
+            connect_authenticated(&silent, &auth, Duration::from_secs(10), &mut |_| Ok(()))).await.is_err());
+    }
+
+    #[test]
+    fn chat_domain_policy_and_packet_authentication() {
+        assert!(chat_target("broadcastlv.chat.bilibili.com", 2245).is_ok());
+        assert!(chat_target("chat.bilibili.com", 443).is_ok());
+        assert!(chat_target("chat.bilibili.com.invalid", 443).is_err());
+        assert!(chat_target("chat.bilibili.com", 80).is_err());
+        assert!(process_packets(&packet(AUTH_REPLY, b"{\"code\":0}"), &mut |_| Ok(())).unwrap());
+        assert!(!process_packets(&packet(3, b""), &mut |_| Ok(())).unwrap());
+    }
 }

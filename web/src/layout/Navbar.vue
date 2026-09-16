@@ -585,8 +585,8 @@ const handleConfirmImportText = () => {
       window.location.reload();
     }, 360);
   } catch (error: any) {
-    console.error('Diagnostic: Navbar.vue:586 (details omitted)');
-    setConfigStatus('error', '导入失败！');
+    console.error('配置导入失败：校验或存储操作失败');
+    setConfigStatus('error', error instanceof Error ? error.message : '配置导入失败。');
   }
 };
 

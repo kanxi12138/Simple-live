@@ -78,16 +78,16 @@ git clone https://github.com/kanxi12138/SLR.git
 cd dtv
 
 # 安装依赖
-pnpm install
+npm ci
 
 # 开发调试
-pnpm tauri dev
+npm run tauri -- dev
 
 # 打包构建
-pnpm tauri build      # 构建当前系统的安装包
+npm run tauri -- build      # 构建当前系统的安装包
 
 # 打包 ARM64 版本（Intel Mac 上交叉编译）
-pnpm tauri build --target aarch64-apple-darwin
+npm run tauri -- build --target aarch64-apple-darwin
 ```
 
 ##  参考

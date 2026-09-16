@@ -38,6 +38,57 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 };
 
+const textValue = (value: unknown): value is string => typeof value === 'string';
+const textArray = (value: unknown): value is string[] => Array.isArray(value) && value.every(textValue);
+const removedPlatforms = new Set(['KUAISHOU', 'NETEASECC', 'CUSTOM_M3U8']);
+const optionalFields = (value: Record<string, unknown>, keys: string[], valid: (item: unknown) => boolean) =>
+  keys.every((key) => value[key] === undefined || valid(value[key]));
+const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const streamerValid = (value: unknown): boolean => isRecord(value)
+  && textValue(value.platform) && (PORTABLE_PLATFORM_KEYS.includes(value.platform as typeof PORTABLE_PLATFORM_KEYS[number]) || removedPlatforms.has(value.platform))
+  && ['id', 'nickname', 'avatarUrl'].every((key) => textValue(value[key]))
+  && optionalFields(value, ['displayName', 'roomTitle', 'currentRoomId'], textValue)
+  && optionalFields(value, ['lastUpdated', 'followedAt'], finite)
+  && optionalFields(value, ['isPinned'], (item) => typeof item === 'boolean')
+  && optionalFields(value, ['isLive'], (item) => item === null || typeof item === 'boolean');
+const folderValid = (value: unknown): boolean => isRecord(value)
+  && textValue(value.id) && textValue(value.name) && textArray(value.streamerIds)
+  && optionalFields(value, ['expanded'], (item) => typeof item === 'boolean');
+
+/** Validates known persisted values before touching the user's existing storage. */
+const validateEntry = (key: string, raw: string): string => {
+  let valid = false;
+  try {
+    if (key === 'theme_preference') valid = ['light', 'dark', 'system'].includes(raw);
+    else if (key.endsWith('_preferred_quality') || key.endsWith('_preferred_line')) valid = raw.trim().length > 0;
+    else if (key === 'dtv_player_volume_v1') valid = raw.trim() !== '' && Number.isFinite(Number(raw)) && Number(raw) >= 0 && Number(raw) <= 1;
+    else {
+      const value: unknown = JSON.parse(raw);
+      if (key === 'danmu_block_keywords') valid = textArray(value);
+      else if (key === 'dtv_player_danmu_collapsed') valid = typeof value === 'boolean';
+      else if (key === 'followedStreamers') valid = Array.isArray(value) && value.every(streamerValid);
+      else if (key === 'followFolders') valid = Array.isArray(value) && value.every(folderValid);
+      else if (key === 'followListOrder') valid = Array.isArray(value) && value.every((item) => isRecord(item)
+        && (item.type === 'folder' ? folderValid(item.data) : item.type === 'streamer' && streamerValid(item.data)));
+      else if (key === 'dtv_custom_categories_v1') valid = Array.isArray(value) && value.every((item) => isRecord(item)
+        && textValue(item.platform) && ['douyu', 'douyin', 'huya', 'bilibili'].includes(item.platform)
+        && textValue(item.cate2Name) && optionalFields(item, ['key', 'cate1Name', 'cate1Href', 'cate2Href', 'douyuId'], textValue));
+      else if (key === 'dtv_danmu_preferences_v1' && isRecord(value) && isRecord(value.settings)) {
+        const settings = value.settings;
+        valid = typeof value.enabled === 'boolean'
+          && optionalFields(settings, ['fontSize'], (item) => textValue(item) && /^\d+(?:\.\d+)?px$/.test(item) && parseFloat(item) > 0)
+          && optionalFields(settings, ['duration'], (item) => finite(item) && item > 0)
+          && optionalFields(settings, ['area'], (item) => finite(item) && item > 0 && item <= 1)
+          && optionalFields(settings, ['opacity'], (item) => finite(item) && item >= 0.2 && item <= 1)
+          && optionalFields(settings, ['mode'], (item) => ['scroll', 'top', 'bottom'].includes(String(item)))
+          && optionalFields(settings, ['density'], (item) => ['dense', 'medium', 'sparse'].includes(String(item)));
+      }
+    }
+  } catch { valid = false; }
+  if (!valid) throw new Error(`配置项 ${key} 内容无效，未导入。`);
+  return raw;
+};
+
 export const isExportableStorageKey = (key: string): boolean => {
   if (EXACT_EXPORTABLE_KEYS.has(key)) {
     return true;
@@ -119,10 +170,11 @@ export const parsePortableConfigPayload = (raw: string): DtvConfigPayload => {
 
   const sanitizedEntries: PortableConfigEntries = {};
   Object.entries(parsed.entries).forEach(([key, value]) => {
-    if (!isExportableStorageKey(key) || typeof value !== 'string') {
+    if (!isExportableStorageKey(key)) {
       return;
     }
-    sanitizedEntries[key] = value;
+    if (typeof value !== 'string') throw new Error(`配置项 ${key} 类型无效，未导入。`);
+    sanitizedEntries[key] = validateEntry(key, value);
   });
 
   return {
@@ -137,20 +189,37 @@ export const parsePortableConfigPayload = (raw: string): DtvConfigPayload => {
   };
 };
 
+const pendingRecovery = new WeakMap<Storage, PortableConfigEntries>();
+
+const writeEntries = (storage: Storage, entries: PortableConfigEntries): void => {
+  const current = collectPortableConfigEntries(storage);
+  Object.keys(current).forEach((key) => { if (!(key in entries)) storage.removeItem(key); });
+  Object.entries(entries).forEach(([key, value]) => {
+    if (storage.getItem(key) !== value) storage.setItem(key, value);
+  });
+};
+
 export const replacePortableConfigEntries = (
   storage: Storage,
   entries: PortableConfigEntries,
 ): void => {
-  const keysToClear: string[] = [];
-  for (let index = 0; index < storage.length; index += 1) {
-    const key = storage.key(index);
-    if (key && isExportableStorageKey(key)) {
-      keysToClear.push(key);
-    }
+  const validated: PortableConfigEntries = {};
+  Object.entries(entries).forEach(([key, value]) => {
+    if (isExportableStorageKey(key)) validated[key] = validateEntry(key, value);
+  });
+  const recovery = pendingRecovery.get(storage);
+  if (recovery) {
+    try { writeEntries(storage, recovery); pendingRecovery.delete(storage); }
+    catch { throw new Error('原配置恢复失败，请释放存储空间后在当前页面重试，勿刷新页面。'); }
   }
-
-  keysToClear.forEach((key) => storage.removeItem(key));
-  Object.entries(sortEntries(entries)).forEach(([key, value]) => storage.setItem(key, value));
+  const snapshot = collectPortableConfigEntries(storage);
+  try { writeEntries(storage, validated); }
+  catch {
+    pendingRecovery.set(storage, snapshot);
+    try { writeEntries(storage, snapshot); pendingRecovery.delete(storage); }
+    catch { throw new Error('导入失败且原配置恢复未完成，请释放存储空间后在当前页面重试，勿刷新页面。'); }
+    throw new Error('配置写入失败，原配置已恢复。');
+  }
 };
 
 const pad = (value: number) => String(value).padStart(2, '0');

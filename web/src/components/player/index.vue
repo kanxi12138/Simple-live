@@ -120,6 +120,7 @@
 </template>
 
 <script setup lang="ts">
+import { diagnosticDetails } from '../../services/diagnostics';
 import { queueStreamProxy, stopStreamProxy as stopDouyuProxy } from '../../platforms/common/playbackProxy';
 import type { PlaybackConfig, PlaybackLine } from '../../platforms/common/playback';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef } from 'vue';
@@ -1182,7 +1183,7 @@ async function initializePlayerAndStream(
     return true;
   } catch (error: any) {
     if (!isActivePlayerInitRun(initRunId)) return false;
-    console.error('Diagnostic: index.vue:1180 (details omitted)');
+    console.error('播放初始化失败', diagnosticDetails(error));
     destroyPlayerInstance();
 
     const errorMessage = error instanceof Error ? error.message
@@ -1209,7 +1210,7 @@ async function initializePlayerAndStream(
           playerAvatar.value = proxify((res?.avatar ?? props.avatar ?? '') as string);
         }
       } catch (infoError) {
-        console.warn('Diagnostic: index.vue:1207 (details omitted)');
+        console.warn('离线房间信息加载失败', diagnosticDetails(infoError));
       }
     } else {
       streamError.value = errorMessage;

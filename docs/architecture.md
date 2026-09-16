@@ -13,7 +13,7 @@
 2. Edit Rust in `core/`
 3. Run `web/npm run android:sync` to mirror `core` into `web/src-tauri`
 4. Run Tauri Android commands from `web/`
-5. Mirror generated Android files into `app/`
+5. Apply Git-tracked Android sources from `app/` to the generated project with `npm run android:apply`; never mirror generated files back into `app/`.
 
 ## Mobile UX goals
 
