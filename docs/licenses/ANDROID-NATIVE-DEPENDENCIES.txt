@@ -1,0 +1,32 @@
+简直播 Android 原生版 7.0.5
+
+本应用按 GNU GPL version 3 分发，完整许可证见 LICENSE。
+平台适配代码根据本项目原有 DTV（MIT）及 dart_simple_live（GPL-3.0）派生代码移植，版权声明继续保留。
+
+AndroidX Compose / Activity / Lifecycle / Room / DataStore / Media3 / Core: Apache License 2.0, Copyright The Android Open Source Project.
+Kotlin / kotlinx.coroutines: Apache License 2.0, Copyright JetBrains and contributors.
+OkHttp / Okio: Apache License 2.0, Copyright Square and contributors.
+Coil: Apache License 2.0, Copyright Coil contributors.
+Rhino 1.7.15: Mozilla Public License 2.0, Copyright Mozilla and contributors.
+Brotli Java decoder: MIT License, Copyright Google Inc.
+jsoup: MIT License, Copyright Jonathan Hedley.
+CryptoJS: MIT License, Copyright Jeff Mott and Evan Vosberg.
+
+上游源码：
+https://android.googlesource.com/platform/frameworks/support/
+https://github.com/androidx/media
+https://github.com/JetBrains/kotlin
+https://github.com/Kotlin/kotlinx.coroutines
+https://github.com/square/okhttp
+https://github.com/square/okio
+https://github.com/coil-kt/coil
+https://github.com/mozilla/rhino
+https://github.com/google/brotli
+https://github.com/jhy/jsoup
+https://github.com/brix/crypto-js
+
+现有派生声明及离线许可证见本应用 THIRD_PARTY_NOTICES.md、DTV-MIT.txt、dart_simple_live-GPL-3.0.txt 以及其他许可证文件。
+
+nv-websocket-client 2.14: Apache License 2.0, Copyright (C) 2015 Takahiko Kawasaki.
+https://github.com/TakahikoKawasaki/nv-websocket-client/tree/nv-websocket-client-2.14
+完整许可证：nv-websocket-client-LICENSE.txt

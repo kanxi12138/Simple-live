@@ -1,3 +1,22 @@
+pluginManagement {
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        google(); mavenCentral(); gradlePluginPortal()
+    }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == 'com.android.application') useModule("com.android.tools.build:gradle:${requested.version}")
+            if (requested.id.id == 'org.jetbrains.kotlin.android' || requested.id.id == 'org.jetbrains.kotlin.kapt') useModule("org.jetbrains.kotlin:kotlin-gradle-plugin:${requested.version}")
+            if (requested.id.id == 'org.jetbrains.kotlin.plugin.compose') useModule("org.jetbrains.kotlin:compose-compiler-gradle-plugin:${requested.version}")
+        }
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/google'; content { includeGroupByRegex 'androidx.*'; includeGroupByRegex 'com.android.*'; includeGroupByRegex 'com.google.*' } }
+        google(); mavenCentral()
+    }
+}
+rootProject.name = 'SimpleLiveNative'
 include ':app'
-
-apply from: 'tauri.settings.gradle'

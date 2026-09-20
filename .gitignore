@@ -68,3 +68,9 @@ _tmp_tools/
 *.pfx
 .env
 .env.*
+
+# Local migration archive (includes uncommitted source snapshot)
+/artifacts/migration/
+
+# Local diagnostics, migration backups and delivery verification
+/artifacts/

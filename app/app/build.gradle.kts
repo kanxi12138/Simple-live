@@ -3,98 +3,69 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("rust")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.kapt")
 }
-
-val tauriProperties = Properties().apply {
-    val propFile = file("tauri.properties")
-    if (propFile.exists()) {
-        propFile.inputStream().use { load(it) }
-    }
+val localConfig = Properties().apply {
+    val source = rootProject.file("local.properties")
+    if (source.exists()) source.inputStream().use { load(it) }
 }
-
-val localProperties = Properties().apply {
-    val propFile = file("../local.properties")
-    if (propFile.exists()) {
-        propFile.inputStream().use { load(it) }
-    }
-}
-
 android {
+    namespace = "com.simplelive.nativeapp"
     compileSdk = 36
-    namespace = "www.sp.com"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "www.sp.com"
+        applicationId = "com.simplelive.nativeapp"
         minSdk = 24
         targetSdk = 36
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        versionCode = 7000008
+        versionName = "7.0.8"
     }
     signingConfigs {
         create("release") {
-            val storeFilePath = localProperties.getProperty("release.keystore.path")
-            val storePasswordValue = localProperties.getProperty("release.keystore.storePassword")
-            val keyAliasValue = localProperties.getProperty("release.keystore.keyAlias")
-            val keyPasswordValue = localProperties.getProperty("release.keystore.keyPassword")
-
-            if (
-                !storeFilePath.isNullOrBlank()
-                && !storePasswordValue.isNullOrBlank()
-                && !keyAliasValue.isNullOrBlank()
-                && !keyPasswordValue.isNullOrBlank()
-            ) {
-                storeFile = file(storeFilePath)
-                storePassword = storePasswordValue
-                keyAlias = keyAliasValue
-                keyPassword = keyPasswordValue
-            }
+            localConfig.getProperty("release.keystore.path")?.let { storeFile = file(it) }
+            storePassword = localConfig.getProperty("release.keystore.storePassword")
+            keyAlias = localConfig.getProperty("release.keystore.keyAlias")
+            keyPassword = localConfig.getProperty("release.keystore.keyPassword")
         }
     }
     buildTypes {
-        getByName("debug") {
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
-            isDebuggable = true
-            isJniDebuggable = true
+        release {
             isMinifyEnabled = false
-            packaging {                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
-                jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
-                jniLibs.keepDebugSymbols.add("*/x86/*.so")
-                jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
-            }
-        }
-        getByName("release") {
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
-            isMinifyEnabled = true
             signingConfig = signingConfigs.getByName("release")
-            proguardFiles(
-                *fileTree(".") { include("**/*.pro") }
-                    .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
-                    .toList().toTypedArray()
-            )
         }
     }
-    kotlinOptions {
-        jvmTarget = "1.8"
+    sourceSets.getByName("main").java.setSrcDirs(listOf("src/main/kotlin"))
+    sourceSets.getByName("main").jniLibs.setSrcDirs(emptyList<String>())
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures {
-        buildConfig = true
-    }
+    kotlinOptions { jvmTarget = "17" }
+    buildFeatures { compose = true; buildConfig = true }
+    packaging { resources.excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*") }
 }
-
-rust {
-    rootDirRel = "../../web"
-}
-
 dependencies {
-    implementation("androidx.webkit:webkit:1.14.0")
-    implementation("androidx.appcompat:appcompat:1.7.1")
-    implementation("androidx.activity:activity-ktx:1.10.1")
-    implementation("com.google.android.material:material:1.12.0")
+    implementation(platform("androidx.compose:compose-bom:2026.02.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
+    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.room:room-runtime:2.7.2")
+    implementation("androidx.room:room-ktx:2.7.2")
+    kapt("androidx.room:room-compiler:2.7.2")
+    implementation("androidx.datastore:datastore-preferences:1.1.7")
+    implementation("androidx.media3:media3-exoplayer:1.11.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.11.0")
+    implementation("androidx.media3:media3-ui:1.11.0")
+    implementation("androidx.media3:media3-datasource-okhttp:1.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.4")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
+    implementation("com.neovisionaries:nv-websocket-client:2.14")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("org.mozilla:rhino:1.7.15")
+    implementation("org.brotli:dec:0.1.2")
+    implementation("org.jsoup:jsoup:1.18.3")
 }
-
-apply(from = "tauri.build.gradle.kts")
