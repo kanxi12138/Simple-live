@@ -39,3 +39,5 @@ Simple-live 是一个用于学习和研究跨平台直播客户端技术的非�
 
 
 原项目灵感来源于 [DTV](https://github.com/chen-zeong/DTV)。
+
+![赞赏支持](images/appreciate.png)
