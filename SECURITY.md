@@ -10,4 +10,4 @@
 
 若入口不可用且维护者未公布私密联系方式，可发一个仅请求私密联系渠道的 Issue，不公开漏洞利用细节、凭据、完整带签名 URL 或用户信息。取得私密渠道后提供受影响版本、必要复现步骤及影响范围。维护者尚未承诺固定响应时限。
 
-本次保留的本地 Cookie 存储风险与其他边界见 [PRIVACY.md](PRIVACY.md) 和 [COMPLIANCE.md](COMPLIANCE.md)。
+原生版的本地凭据加密、官方登录网页与其他数据处理边界见 [PRIVACY.md](PRIVACY.md) 和 [COMPLIANCE.md](COMPLIANCE.md)。
