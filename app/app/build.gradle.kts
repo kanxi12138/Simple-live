@@ -17,8 +17,8 @@ android {
         applicationId = "com.simplelive.nativeapp"
         minSdk = 24
         targetSdk = 36
-        versionCode = 7000008
-        versionName = "7.0.8"
+        versionCode = 7000009
+        versionName = "7.0.9"
     }
     signingConfigs {
         create("release") {

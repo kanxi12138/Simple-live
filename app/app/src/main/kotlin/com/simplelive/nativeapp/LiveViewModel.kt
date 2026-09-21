@@ -258,7 +258,7 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     fun foreground(active: Boolean) { foreground=active;if(active) startDanmaku() else stopDanmaku() }
     fun toggleFollow(room: Room) = operation { if(library.value.follows.any { it.room.key==room.key }) storage.unfollow(room) else storage.follow(room) }
     fun refreshFollows() {
-        if(refreshJob?.isActive==true) return
+        if(refreshJob?.isActive==true || library.value.follows.isEmpty()) return
         mutableFollowsRefreshing.value=true
         refreshJob=viewModelScope.launch {
             try {

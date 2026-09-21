@@ -7,6 +7,8 @@ import android.view.Choreographer
 import android.view.View
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.sp
@@ -25,7 +27,11 @@ fun DanmakuOverlay(model: LiveViewModel,revision: Int,settings: DanmakuSettings,
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     val fontSize=with(LocalDensity.current) { settings.fontSize.sp.toPx() }
     val overlay=remember(context,revision) { DanmakuCanvas(context) }
-    AndroidView(factory={overlay},modifier=modifier,update={it.configure(settings,fontSize,blocked)})
+    // Composite opaque text and its shadow first, then fade the completed overlay.
+    AndroidView(factory={overlay},modifier=modifier.graphicsLayer {
+        alpha=settings.opacity.coerceIn(0f,1f)
+        compositingStrategy=if(alpha<1f) CompositingStrategy.Offscreen else CompositingStrategy.Auto
+    },update={it.configure(settings,fontSize,blocked)})
     LaunchedEffect(overlay,lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             overlay.start()
@@ -64,7 +70,7 @@ private class DanmakuCanvas(context: Context) : View(context),Choreographer.Fram
         val layoutChanged=paint.textSize!=fontSize || settings.copy(opacity=value.opacity)!=value
         settings=value
         paint.textSize=fontSize
-        paint.alpha=(value.opacity*255).toInt().coerceIn(0,255)
+        paint.alpha=255
         if(blocked!=words) {
             blocked=words
             entries.removeAll { entry -> blocked.any { it.isNotBlank() && entry.text.contains(it,true) } }
