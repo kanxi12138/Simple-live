@@ -56,7 +56,11 @@ fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolea
         Scaffold(snackbarHost={ SnackbarHost(snackbar) },bottomBar={
             if(player.room==null) NavigationBar(containerColor=MaterialTheme.colorScheme.surface) {
                 listOf(Triple("首页",Icons.Outlined.Home,0),Triple("搜索",Icons.Outlined.Search,1),Triple("关注",Icons.Outlined.FavoriteBorder,2),Triple("设置",Icons.Outlined.Settings,3)).forEach { (label,icon,index)->
-                    NavigationBarItem(selected=tab==index,onClick={tab=index},icon={Icon(icon,label)},label={Text(label)})
+                    NavigationBarItem(selected=tab==index,onClick={
+                        val enteringFollows=tab!=2 && index==2
+                        tab=index
+                        if(enteringFollows) model.refreshFollows()
+                    },icon={Icon(icon,label)},label={Text(label)})
                 }
             }
         }) { padding ->
