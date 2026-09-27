@@ -1,7 +1,6 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.simplelive.nativeapp
 
-import android.content.res.Configuration
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -18,25 +17,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import org.json.JSONArray
@@ -53,27 +40,28 @@ data class DanmakuSettings(val enabled: Boolean=true,val fontSize: Float=20f,val
     }
 }
 @Composable
-fun PlayerScreen(model: LiveViewModel,onFullscreen: (Boolean)->Unit,onLogin: (Platform)->Unit) {
+fun PlayerScreen(model: LiveViewModel,onFullscreen: (Boolean,Boolean)->Unit,onLogin: (Platform)->Unit) {
     val state by model.player.collectAsStateWithLifecycle()
     val preferences by model.preferences.collectAsStateWithLifecycle()
     val library by model.library.collectAsStateWithLifecycle()
     val room=state.room ?: return
-    val landscape=LocalConfiguration.current.orientation==Configuration.ORIENTATION_LANDSCAPE
-    var fullscreen by remember { mutableStateOf(landscape) }
+    val playbackStatus by model.app.playback.status.collectAsStateWithLifecycle()
+    val audioOnly=room.isAudioLive || playbackStatus.audioOnly
+    var fullscreen by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var interaction by remember { mutableIntStateOf(0) }
-    var activePlayer by remember { mutableStateOf<Player?>(null) }
-    var playing by remember { mutableStateOf(true) }
-    var playbackFailed by remember { mutableStateOf(false) }
+    val activePlayer=playbackStatus.player
+    val playing=playbackStatus.playing
+    val playbackFailed=playbackStatus.error.isNotBlank()
     var panel by remember { mutableStateOf("") }
     var details by remember { mutableStateOf(false) }
     val settings=remember(preferences["dtv_danmu_preferences_v1"]) { DanmakuSettings.from(preferences["dtv_danmu_preferences_v1"]) }
     val words=remember(preferences["danmu_block_keywords"]) { JSONArray(preferences["danmu_block_keywords"] ?: "[]").strings() }
     val messages=remember(state.messages,words) { state.messages.filter { message -> words.none { word -> word.isNotBlank() && message.text.contains(word,true) } } }
-    fun leave() { onFullscreen(false); fullscreen=false;model.closePlayer() }
+    fun leave() { onFullscreen(false,false); fullscreen=false;model.closePlayer() }
     BackHandler { if(panel.isNotBlank()) { panel="";interaction++ } else if(fullscreen) { fullscreen=false } else leave() }
-    DisposableEffect(Unit) { onDispose { onFullscreen(false) } }
-    LaunchedEffect(fullscreen) { onFullscreen(fullscreen) }
+    DisposableEffect(Unit) { onDispose { onFullscreen(false,false) } }
+    LaunchedEffect(fullscreen,playbackStatus.landscape,audioOnly) { onFullscreen(fullscreen,playbackStatus.landscape && !audioOnly) }
     LaunchedEffect(playing,playbackFailed,state.error) {
         if(!playing || playbackFailed || state.error.isNotBlank()) controlsVisible=true
     }
@@ -90,7 +78,7 @@ fun PlayerScreen(model: LiveViewModel,onFullscreen: (Boolean)->Unit,onLogin: (Pl
                 IconButton(onClick={details=true}){Icon(Icons.Outlined.Info,"房间详情")}
             }
             Box(if(fullscreen) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth().aspectRatio(16f/9f)) {
-                NativeVideo(state,model,Modifier.fillMaxSize(),{activePlayer=it},{playing=it},{playbackFailed=it})
+                NativeVideo(playbackStatus.copy(audioOnly=audioOnly),Modifier.fillMaxSize())
                 if(state.playback!=null && settings.enabled) key(state.revision) { DanmakuOverlay(model,state.revision,settings,words,Modifier.fillMaxSize()) }
                 Box(Modifier.fillMaxSize().clickable { controlsVisible=!controlsVisible;interaction++ })
                 if(state.loading) CircularProgressIndicator(Modifier.align(Alignment.Center),color=Color.White)
@@ -166,56 +154,21 @@ fun PlayerScreen(model: LiveViewModel,onFullscreen: (Boolean)->Unit,onLogin: (Pl
 }
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-private fun NativeVideo(state: PlayerState,model: LiveViewModel,modifier: Modifier,onPlayer: (Player?)->Unit,onPlaying: (Boolean)->Unit,onFailed: (Boolean)->Unit) {
+private fun NativeVideo(status: PlaybackStatus,modifier: Modifier) {
     val context=LocalContext.current
-    val lifecycle=LocalLifecycleOwner.current.lifecycle
-    val preferences by model.preferences.collectAsStateWithLifecycle()
-    val playerCallback by rememberUpdatedState(onPlayer)
-    val playingCallback by rememberUpdatedState(onPlaying)
-    val failureCallback by rememberUpdatedState(onFailed)
-    val playback=state.playback
-    var error by remember(state.revision) { mutableStateOf("") }
-    val exo=remember(playback,state.revision) {
-        if(playback==null) null else {
-            val client=model.app.network.client.newBuilder().callTimeout(0,java.util.concurrent.TimeUnit.MILLISECONDS).followRedirects(true).followSslRedirects(true)
-                .addNetworkInterceptor { chain ->
-                    validateStream(playback.room.platform,chain.request().url.toString())
-                    chain.proceed(chain.request().newBuilder().removeHeader("Cookie").removeHeader("Authorization").build())
-                }.build()
-            val factory=OkHttpDataSource.Factory(client).setDefaultRequestProperties(playback.headers)
-            ExoPlayer.Builder(context).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build().apply {
-                setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),true)
-                setHandleAudioBecomingNoisy(true)
-                addListener(object: Player.Listener {
-                    override fun onPlayWhenReadyChanged(playWhenReady: Boolean,reason: Int) { playingCallback(playWhenReady) }
-                    override fun onPlayerError(value: PlaybackException) { failureCallback(true);error=when {
-                        generateSequence<Throwable>(value) { it.cause }.any { it is StreamAddressException } -> "播放地址不受支持，请切换画质或线路"
-                        value.errorCode in 4000..4999 -> "设备无法解码当前画质，请切换画质或线路"
-                        value.errorCode in 2000..2999 -> "播放网络请求失败，请刷新或切换线路"
-                        else -> "播放失败（${value.errorCodeName}），可刷新或切换线路"
-                    } }
-                })
-                setMediaItem(MediaItem.fromUri(playback.url)); prepare(); playWhenReady=lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-            }
-        }
-    }
-    DisposableEffect(exo,lifecycle) {
-        playerCallback(exo);playingCallback(exo?.playWhenReady==true);failureCallback(false)
+    DisposableEffect(context) {
         val activity=context as? MainActivity
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        var resumePlayback=false
-        val observer=LifecycleEventObserver { _,event ->
-            if(event==Lifecycle.Event.ON_STOP) { resumePlayback=exo?.playWhenReady==true;exo?.pause() }
-            if(event==Lifecycle.Event.ON_START && resumePlayback) exo?.play()
-        }
-        lifecycle.addObserver(observer)
-        onDispose { playerCallback(null);lifecycle.removeObserver(observer);exo?.release();activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
-    LaunchedEffect(exo,preferences["dtv_player_volume_v1"]) { exo?.volume=preferences["dtv_player_volume_v1"]?.toFloatOrNull()?.coerceIn(0f,1f) ?: 1f }
     Box(modifier.background(Color.Black)) {
-        AndroidView(factory={PlayerView(it).apply { useController=false }},update={it.player=exo},onRelease={it.player=null},modifier=Modifier.fillMaxSize())
-        if(error.isNotBlank()) Column(Modifier.align(Alignment.Center).background(Color(0xcc000000)).padding(16.dp)) {
-            Text(error,color=Color.White)
+        AndroidView(factory={PlayerView(it).apply { useController=false }},update={it.player=status.player},onRelease={it.player=null},modifier=Modifier.fillMaxSize())
+        if(status.audioOnly) Column(Modifier.align(Alignment.TopCenter).padding(horizontal=16.dp,vertical=12.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+            Text("该直播间为音频直播无画面",color=Color.White)
+            if(status.audioStatus.isNotBlank()) Text(status.audioStatus,color=Color.LightGray,fontSize=12.sp)
+        }
+        if(status.error.isNotBlank()) Column(Modifier.align(Alignment.Center).background(Color(0xcc000000)).padding(16.dp)) {
+            Text(status.error,color=Color.White)
         }
     }
 }

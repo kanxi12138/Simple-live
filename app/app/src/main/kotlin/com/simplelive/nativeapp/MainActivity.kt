@@ -20,6 +20,8 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 class MainActivity : ComponentActivity() {
     private val model: LiveViewModel by viewModels()
@@ -28,8 +30,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(); super.onCreate(savedInstanceState)
         setContent { LiveApp(model,::login,::fullscreen,::verifyBili) }
     }
-    fun fullscreen(enabled: Boolean) {
-        requestedOrientation=if(enabled) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    fun fullscreen(enabled: Boolean,landscape: Boolean) {
+        requestedOrientation=if(enabled && landscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         WindowCompat.getInsetsController(window,window.decorView).apply {
             systemBarsBehavior=WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             if(enabled) hide(WindowInsetsCompat.Type.systemBars()) else show(WindowInsetsCompat.Type.systemBars())
@@ -63,7 +65,37 @@ class MainActivity : ComponentActivity() {
         val dialog=Dialog(this,android.R.style.Theme_DeviceDefault_Light_NoActionBar)
         val layout=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; fitsSystemWindows=true }
         var confirmed=false
-        val done=Button(this).apply { text="完成登录，返回简直播"; setOnClickListener { confirmed=true; dialog.dismiss() } }
+        var loginGeneration: Long?=null
+        val done=Button(this).apply { text="完成登录，返回简直播";isEnabled=platform!=Platform.DOUYIN }
+        done.setOnClickListener {
+            if(platform!=Platform.DOUYIN) { confirmed=true;dialog.dismiss();return@setOnClickListener }
+            val generation=loginGeneration ?: return@setOnClickListener
+            val candidate=(cookies.getCookie("https://www.douyin.com/").orEmpty().split(';') + cookies.getCookie(Platform.DOUYIN.home).orEmpty().split(';'))
+                .map { it.trim() }.filter { it.contains('=') }.associate { it.substringBefore('=') to it.substringAfter('=') }
+            if(listOf("sessionid","sessionid_ss","sid_guard").none { !candidate[it].isNullOrBlank() }) {
+                android.widget.Toast.makeText(this,"未获取到账号会话，请先完成登录",android.widget.Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            val cookie=candidate.entries.joinToString("; ") { "${it.key}=${it.value}" }
+            done.isEnabled=false
+            val application=model.app
+            application.applicationScope.launch {
+                try {
+                    withContext(Dispatchers.IO) { application.credentials.saveDouyinLogin(cookie,generation) }
+                    if(!isDestroyed) {
+                        model.notice.value="抖音登录信息已保存"
+                        if(loginDialog===dialog) dialog.dismiss()
+                        if(model.browse.value.platform==Platform.DOUYIN) model.loadRooms()
+                    }
+                } catch(error: kotlinx.coroutines.CancellationException) { throw error }
+                catch(error: Exception) {
+                    if(!isDestroyed && loginDialog===dialog) {
+                        done.isEnabled=true
+                        android.widget.Toast.makeText(this@MainActivity,"登录信息保存失败，原登录信息已保留",android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
         layout.addView(done); layout.addView(webView,LinearLayout.LayoutParams(-1,0,1f))
         dialog.setContentView(layout)
         dialog.setOnDismissListener {
@@ -97,7 +129,34 @@ class MainActivity : ComponentActivity() {
                 catch(error: Exception) { model.notice.value="登录信息保存失败，原登录信息已保留" }
             }
         }
-        loginDialog=dialog; dialog.show(); webView.loadUrl(target)
+        loginDialog=dialog; dialog.show()
+        if(platform!=Platform.DOUYIN) webView.loadUrl(target) else lifecycleScope.launch {
+            try {
+                val snapshot=withContext(Dispatchers.IO) { model.app.credentials.douyinSnapshot() }
+                suspendCancellableCoroutine<Unit> { continuation ->
+                    cookies.removeAllCookies { if(continuation.isActive) continuation.resume(Unit) }
+                }
+                for(cookie in snapshot.cookies.filter { it.expiresAt>System.currentTimeMillis() }) {
+                    if(loginDialog!==dialog || !dialog.isShowing) return@launch
+                    val restored=suspendCancellableCoroutine<Boolean> { continuation ->
+                        cookies.setCookie("https://${cookie.domain}${cookie.path}",cookie.toString()) {
+                            if(continuation.isActive) continuation.resume(it)
+                        }
+                    }
+                    check(restored) { "抖音登录信息恢复失败" }
+                }
+                if(loginDialog===dialog && dialog.isShowing) {
+                    cookies.flush();loginGeneration=snapshot.generation;done.isEnabled=true
+                    webView.loadUrl(target)
+                }
+            } catch(error: kotlinx.coroutines.CancellationException) { throw error }
+            catch(error: Exception) {
+                if(loginDialog===dialog && dialog.isShowing) {
+                    model.notice.value="抖音登录信息恢复失败，原登录信息已保留"
+                    dialog.dismiss()
+                }
+            }
+        }
     }
     override fun onDestroy() { loginDialog?.dismiss(); super.onDestroy() }
     override fun onStart() { super.onStart();model.foreground(true) }

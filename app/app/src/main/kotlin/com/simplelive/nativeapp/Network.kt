@@ -55,13 +55,13 @@ class Network {
                         }
                         current = next
                     } else {
+                        onHeaders(it.headers)
                         if (!it.isSuccessful) throw PlatformException(when(it.code) {
                             401 -> "平台身份验证失败，请重新登录或重试"
                             403 -> "平台拒绝访问，请稍后重试"
                             429 -> "请求过于频繁，请稍后重试"
                             else -> "网络请求失败（${it.code}）"
                         },httpStatus=it.code)
-                        onHeaders(it.headers)
                         val source = it.body?.source() ?: throw PlatformException("平台返回空响应")
                         // API payloads and protocol frames are bounded; never buffer an endless live stream.
                         source.request(8L * 1024 * 1024 + 1)

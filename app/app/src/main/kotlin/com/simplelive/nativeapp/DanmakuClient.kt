@@ -92,16 +92,11 @@ class DanmakuClient(
             require(room.realId.matches(Regex("[0-9]{17,20}"))) { "直播间真实标识无效" }
             var result: Pair<Map<String,String>,DouyinSession.Visitor>?=null
             for(attempt in 0..1) {
-                val initial=douyin.authHeaders(refreshGuest=attempt>0)
-                var cookie=initial["Cookie"].orEmpty()
-                val headers=initial+mapOf("Accept" to "text/html,application/xhtml+xml", "Referer" to "https://live.douyin.com/")
-                val html=net.request("https://live.douyin.com/${room.id}",headers,onHeaders={
-                    cookie=DouyinSession.mergeCookies(cookie,it.values("Set-Cookie"))
-                }).toString(Charsets.UTF_8)
+                val (html,headers)=douyin.roomPage(room,refreshGuest=attempt>0)
                 val visitor=DouyinSession.visitor(html)
-                if(visitor!=null && cookieValue(cookie,"ttwid").isNotBlank()) {
+                if(visitor!=null && cookieValue(headers["Cookie"].orEmpty(),"ttwid").isNotBlank()) {
                     android.util.Log.i("Danmaku","DOUYIN phase=session identity_source=${visitor.source}")
-                    result=(initial+mapOf("Cookie" to cookie,"Referer" to "https://live.douyin.com/${room.id}")) to visitor
+                    result=headers to visitor
                     break
                 }
             }

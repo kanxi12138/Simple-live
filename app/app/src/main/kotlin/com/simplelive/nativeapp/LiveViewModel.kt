@@ -25,7 +25,7 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     val notice=MutableStateFlow("")
     val browse=MutableStateFlow(BrowseState())
     val search=MutableStateFlow(SearchState())
-    val player=MutableStateFlow(PlayerState())
+    val player=app.playback.state
     private val updater=Updates(app,app.network)
     private val mutableUpdate=MutableStateFlow(UpdateState(busy=true))
     val update: StateFlow<UpdateState> = mutableUpdate.asStateFlow()
@@ -48,6 +48,13 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     val followsRefreshing: StateFlow<Boolean> = mutableFollowsRefreshing.asStateFlow()
     @Volatile private var foreground=true
     init { operation { storage.recoverImport(); ready.value=true; selectPlatform(Platform.DOUYU) } }
+    init {
+        viewModelScope.launch {
+            player.map { it.room?.key }.distinctUntilChanged().collect { key ->
+                if(key==null) { playerJob?.cancel();stopDanmaku() }
+            }
+        }
+    }
     init {
         updateJob=viewModelScope.launch {
             try { mutableUpdate.value=UpdateState(file=updater.restoredDownload()) }
@@ -192,7 +199,7 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun open(room: Room,quality: String?=null,line: String?=null) {
         if(room.id.isBlank()) { notice.value="该账号未提供直播房间号"; return }
-        playerJob?.cancel(); stopDanmaku()
+        playerJob?.cancel(); stopDanmaku(); app.playback.reset()
         val generation=++playerGeneration
         val revision=player.value.revision+1
         player.value=PlayerState(room=room,loading=true,revision=revision)
@@ -200,20 +207,22 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val adapter=app.platforms.getValue(room.platform)
                 val current=adapter.detail(room)
-                if(generation!=playerGeneration) return@launch
+                if(generation!=playerGeneration || player.value.revision!=revision || player.value.room==null) return@launch
+                player.update { it.copy(room=current) }
                 if(current.status!=LiveStatus.LIVE) { player.value=PlayerState(room=current,error=if(current.status==LiveStatus.REPLAY) "主播正在轮播，暂无实时直播" else "主播未开播",revision=revision); return@launch }
                 val result=adapter.playback(current,quality ?: preferences.value["${room.platform.name}_preferred_quality"],line ?: preferences.value["${room.platform.name}_preferred_line"])
-                if(generation!=playerGeneration) return@launch
+                if(generation!=playerGeneration || player.value.revision!=revision || player.value.room==null) return@launch
                 player.value=PlayerState(room=result.room,playback=result,revision=revision)
+                app.playback.play(result)
                 storage.preference("${room.platform.name}_preferred_quality",result.quality)
                 storage.preference("${room.platform.name}_preferred_line",result.line)
-                if(generation!=playerGeneration) return@launch
+                if(generation!=playerGeneration || player.value.revision!=revision || player.value.room==null) return@launch
                 startDanmaku()
             } catch(error: CancellationException) { throw error }
-            catch(error: Exception) { if(generation==playerGeneration) player.update { it.copy(loading=false,error=errorText(error),needsLogin=requiresLogin(room.platform,error)) } }
+            catch(error: Exception) { if(generation==playerGeneration && player.value.revision==revision && player.value.room!=null) player.update { it.copy(loading=false,error=errorText(error),needsLogin=requiresLogin(room.platform,error)) } }
         }
     }
-    fun closePlayer() { playerGeneration++; playerJob?.cancel(); stopDanmaku(); player.value=PlayerState() }
+    fun closePlayer() { playerGeneration++; playerJob?.cancel(); stopDanmaku(); app.playback.stop() }
     private fun stopDanmaku() { danmakuGeneration++;danmakuJob?.cancel() }
     fun reconnectDanmaku() {
         if(player.value.playback==null) return

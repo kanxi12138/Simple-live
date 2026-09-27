@@ -57,7 +57,7 @@ fun SettingsScreen(model: LiveViewModel,onLogin: (Platform)->Unit) {
         ListItem(headlineContent={Text("弹幕与屏蔽词")},supportingContent={Text("字号、速度、透明度、密度和显示区域")},leadingContent={Icon(Icons.Outlined.Forum,null)},modifier=Modifier.clickable{danmaku=true})
         SettingHeading("平台登录")
         listOf(Platform.DOUYIN,Platform.BILIBILI).forEach { platform ->
-            ListItem(headlineContent={Text(platform.label)},supportingContent={Text("使用平台官方网页登录")},leadingContent={Icon(Icons.Outlined.AccountCircle,null)},trailingContent={TextButton(onClick={model.operation{model.app.credentials.clear(platform);model.notice.value="已清除${platform.label}登录信息"}}){Text("退出登录")}},modifier=Modifier.clickable{onLogin(platform)})
+            ListItem(headlineContent={Text(platform.label)},supportingContent={Text("使用平台官方网页登录")},leadingContent={Icon(Icons.Outlined.AccountCircle,null)},trailingContent={TextButton(onClick={model.operation{if(platform==Platform.DOUYIN) (model.app.platforms.getValue(platform) as DouyinPlatform).clearSession() else model.app.credentials.clear(platform);model.notice.value="已清除${platform.label}登录信息"}}){Text("退出登录")}},modifier=Modifier.clickable{onLogin(platform)})
         }
         SettingHeading("配置迁移")
         ListItem(headlineContent={Text("导出配置")},supportingContent={Text("关注、分组、订阅分类、主题和播放偏好")},leadingContent={Icon(Icons.Outlined.FileUpload,null)},modifier=Modifier.clickable(enabled=!busy){exportLauncher.launch("simplelive-config.json")})

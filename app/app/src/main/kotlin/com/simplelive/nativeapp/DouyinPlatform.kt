@@ -2,8 +2,10 @@ package com.simplelive.nativeapp
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import okhttp3.Request
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.SecureRandom
@@ -13,8 +15,12 @@ fun cookieValue(cookie: String, name: String): String = cookie.split(';').map { 
 
 class DouyinPlatform(private val context: Context, private val net: Network, private val credentials: Credentials) : LivePlatform {
     private var guestCookie: String = ""
-    suspend fun authHeaders(refreshGuest: Boolean = false): Map<String, String> {
-        val saved = credentials.get(Platform.DOUYIN)
+    private var guestGeneration=-1L
+    suspend fun authHeaders(refreshGuest: Boolean = false,url: String=Platform.DOUYIN.home,snapshot: DouyinCredentialSnapshot=credentials.douyinSnapshot()): Map<String, String> {
+        val target=url.toHttpUrl()
+        require(target.isHttps && target.host in listOf("www.douyin.com","live.douyin.com")) { "抖音会话地址不受支持" }
+        if(guestGeneration!=snapshot.generation) { guestCookie="";guestGeneration=snapshot.generation }
+        val saved = snapshot.header(url)
         if (refreshGuest && saved.isBlank()) guestCookie = ""
         if (saved.isBlank() && guestCookie.isBlank()) {
             guestCookie = withContext(Dispatchers.IO) {
@@ -28,7 +34,7 @@ class DouyinPlatform(private val context: Context, private val net: Network, pri
                     response.headers("Set-Cookie").map { it.substringBefore(';') }.filter { it.substringBefore('=') in listOf("ttwid","msToken","__ac_nonce","tt_scid","s_v_web_id") }.joinToString("; ")
                 }
             }
-            if (cookieValue(guestCookie,"ttwid").isBlank()) throw PlatformException("抖音未返回会话信息，请登录后重试",-101)
+            if (cookieValue(guestCookie,"ttwid").isBlank()) throw PlatformException("抖音未返回访客会话，请稍后重试")
         }
         var cookie=saved.ifBlank { guestCookie }
         if(cookieValue(cookie,"msToken").isBlank()) {
@@ -40,15 +46,35 @@ class DouyinPlatform(private val context: Context, private val net: Network, pri
         }
         return platformHeaders(Platform.DOUYIN) + mapOf("User-Agent" to DOUYIN_UA, "Cookie" to cookie)
     }
+    fun clearSession() { credentials.clear(Platform.DOUYIN);guestCookie="";guestGeneration=-1L }
+
+    private suspend fun authenticatedJson(url: String,headers: Map<String,String>,snapshot: DouyinCredentialSnapshot): JSONObject =
+        JSONObject(net.request(url,headers,onHeaders={ credentials.updateDouyinCookies(snapshot,url,it.values("Set-Cookie")) }).toString(Charsets.UTF_8))
+
+    suspend fun roomPage(room: Room,refreshGuest: Boolean): Pair<String,Map<String,String>> {
+        val url="https://live.douyin.com/${room.id}"
+        val snapshot=credentials.douyinSnapshot()
+        val initial=authHeaders(refreshGuest,url,snapshot)
+        var cookie=initial["Cookie"].orEmpty()
+        val headers=initial+mapOf("Accept" to "text/html,application/xhtml+xml","Referer" to Platform.DOUYIN.home)
+        val html=net.request(url,headers,onHeaders={ response ->
+            credentials.updateDouyinCookies(snapshot,url,response.values("Set-Cookie"))
+            cookie=DouyinSession.mergeCookies(cookie,response.values("Set-Cookie"))
+        }).toString(Charsets.UTF_8)
+        val current=credentials.douyinSnapshot()
+        check(current.generation==snapshot.generation) { "抖音会话已改变，请重试" }
+        return html to (initial+mapOf("Cookie" to if(current.cookies.isEmpty()) cookie else current.header(url),"Referer" to url))
+    }
     override suspend fun categories(): List<Category> = JSONArray(context.assetText("platform/douyin_categories.json")).objects().flatMap { parent ->
         parent.arr("subcategories").objects().map { Category(it.str("href").substringAfterLast('/'), it.str("title"), parent.str("title")) }
     }
     private suspend fun signedData(endpoint: String, values: List<Pair<String,String>>): JSONObject {
         val parameters = query(*values.toTypedArray())
         val signature = withContext(Dispatchers.Default) { DouyinSigning.generate(parameters, DOUYIN_UA) }
-        val result = net.json("$endpoint?$parameters&a_bogus=${encoded(signature)}", authHeaders())
+        val snapshot=credentials.douyinSnapshot()
+        val result = authenticatedJson("$endpoint?$parameters&a_bogus=${encoded(signature)}",authHeaders(url=endpoint,snapshot=snapshot),snapshot)
         val code=result.optInt("status_code", -1)
-        if (code != 0) throw PlatformException("抖音接口请求失败（$code），请稍后重试",code)
+        if (code != 0) throw PlatformException(if(code == -101) "抖音登录已失效，请重新登录" else "抖音接口请求失败（$code），请稍后重试",code)
         return result.obj("data")
     }
     private fun metadata(value: JSONObject, webId: String): Room {
@@ -58,7 +84,8 @@ class DouyinPlatform(private val context: Context, private val net: Network, pri
             when(value.optInt("status")) { 2 -> LiveStatus.LIVE; 4 -> LiveStatus.OFFLINE; else -> LiveStatus.UNKNOWN },
             value.obj("stats").str("user_count_str",value.obj("stats").str("total_user_str")),
             value.str("id_str",value.str("id",webId)),owner.str("id_str",owner.str("id")),
-            mapOf("sec_uid" to owner.str("sec_uid"),"douyin_id" to owner.str("unique_id",owner.str("short_id"))))
+            mapOf("sec_uid" to owner.str("sec_uid"),"douyin_id" to owner.str("unique_id",owner.str("short_id"))) +
+                if(value.has("live_type_audio") && !value.isNull("live_type_audio")) mapOf("live_type_audio" to value.optBoolean("live_type_audio").toString()) else emptyMap())
     }
     override suspend fun rooms(category: Category?, page: Int): List<Room> {
         val parts=(category?.id ?: "1_1_1_1010032").split('_')
@@ -67,17 +94,20 @@ class DouyinPlatform(private val context: Context, private val net: Network, pri
     }
     override suspend fun search(keyword: String, page: Int): List<Room> = searchMode(keyword,page,false)
     suspend fun searchMode(keyword: String, page: Int, accounts: Boolean): List<Room> {
-        val auth=authHeaders()
+        val endpoint=if(accounts) "discover/search" else "live/search"
+        val url="https://www.douyin.com/aweme/v1/web/$endpoint/"
+        val snapshot=credentials.douyinSnapshot()
+        val auth=authHeaders(url=url,snapshot=snapshot)
         val webId=cookieValue(auth["Cookie"].orEmpty(),"webid").ifBlank { "738${System.currentTimeMillis()}0" }
         val values=listOf("device_platform" to "webapp","aid" to "6383","channel" to "channel_pc_web","search_channel" to if(accounts) "aweme_user_web" else "aweme_live","keyword" to keyword,"search_source" to if(accounts) "normal_search" else "switch_tab","query_correct_type" to "1","is_filter_search" to "0","from_group_id" to "","offset" to ((page-1)*10).toString(),"count" to "10","pc_client_type" to "1","version_code" to "170400","version_name" to "17.4.0","cookie_enabled" to "true","screen_width" to "1980","screen_height" to "1080","browser_language" to "zh-CN","browser_platform" to "Win32","browser_name" to "Edge","browser_version" to "125.0.0.0","browser_online" to "true","engine_name" to "Blink","engine_version" to "125.0.0.0","os_name" to "Windows","os_version" to "10","cpu_core_num" to "12","device_memory" to "8","platform" to "PC","webid" to webId,"disable_rs" to "0","need_filter_settings" to "1","list_type" to "single")
-        val endpoint=if(accounts) "discover/search" else "live/search"
-        val result=net.json("https://www.douyin.com/aweme/v1/web/$endpoint/?${query(*values.toTypedArray())}",auth + ("Referer" to "https://www.douyin.com/search/${encoded(keyword)}?type=${if(accounts) "user" else "live"}"))
-        if(result.optInt("status_code",-1)!=0) throw PlatformException("抖音搜索失败，请登录后重试")
+        val result=authenticatedJson("$url?${query(*values.toTypedArray())}",auth + ("Referer" to "https://www.douyin.com/search/${encoded(keyword)}?type=${if(accounts) "user" else "live"}"),snapshot)
+        val code=result.optInt("status_code",-1)
+        if(code!=0) throw PlatformException(if(code == -101) "抖音登录已失效，请重新登录" else "抖音搜索暂不可用（$code），请稍后重试",code)
         if(!accounts) {
-            if(!result.has("data")) throw PlatformException("抖音没有返回搜索列表，请登录后重试")
+            if(!result.has("data")) throw PlatformException("抖音没有返回搜索列表，请稍后重试")
             return result.arr("data").objects().mapNotNull { entry -> val raw=entry.obj("lives").str("rawdata"); if(raw.isBlank()) null else metadata(JSONObject(raw),"") }.filter { it.id.isNotBlank() }
         }
-        if(!result.has("user_list")) throw PlatformException("抖音没有返回账号列表，请登录后重试")
+        if(!result.has("user_list")) throw PlatformException("抖音没有返回账号列表，请稍后重试")
         return result.arr("user_list").objects().map { entry ->
             val user=entry.obj("user_info")
             val raw=user.opt("room_data")
@@ -89,17 +119,35 @@ class DouyinPlatform(private val context: Context, private val net: Network, pri
                 realId=roomId,userId=user.str("uid"),extra=mapOf("sec_uid" to user.str("sec_uid"),"douyin_id" to user.str("unique_id",user.str("short_id")),"followers" to user.str("follower_count")))
         }
     }
+    private suspend fun sharedRoomData(realId: String): JSONObject = net.json(
+        "https://webcast.amemv.com/webcast/room/reflow/info/?type_id=0&live_id=1&room_id=${encoded(realId)}&sec_user_id=&app_id=6383",
+        mapOf("User-Agent" to DOUYIN_UA)).path("data","room")
+
     suspend fun roomData(room: Room): JSONObject {
         require(room.id.matches(Regex("[0-9]+"))) { "抖音房间号必须是数字" }
         var webId=room.id
-        if(webId.length>16) {
-            val result=net.json("https://webcast.amemv.com/webcast/room/reflow/info/?type_id=0&live_id=1&room_id=${encoded(webId)}&sec_user_id=&app_id=6383",mapOf("User-Agent" to DOUYIN_UA)).path("data","room")
+        if(room.realId.matches(Regex("[0-9]{17,20}"))) {
+            val result=sharedRoomData(room.realId)
             if(result.optInt("status")!=4 && result.has("id")) return result
-            webId=result.obj("owner").str("web_rid").ifBlank { throw PlatformException("抖音房间已失效") }
+            webId=result.obj("owner").str("web_rid").ifBlank {
+                room.id.takeIf { it.length<=16 } ?: throw PlatformException("抖音房间已失效")
+            }
         }
         val data=signedData("https://live.douyin.com/webcast/room/web/enter/",listOf("aid" to "6383","app_name" to "douyin_web","live_id" to "1","device_platform" to "web","language" to "zh-CN","browser_language" to "zh-CN","browser_platform" to "Win32","browser_name" to "Chrome","browser_version" to "125.0.0.0","web_rid" to webId,"msToken" to ""))
         val result=data.arr("data").optJSONObject(0) ?: throw PlatformException("抖音没有返回房间数据")
         if(!result.has("owner")) result.put("owner",data.obj("user"))
+        val realId=result.str("id_str",result.str("id"))
+        if(result.isNull("live_type_audio") && realId.matches(Regex("[0-9]{17,20}"))) {
+            try {
+                val shared=sharedRoomData(realId)
+                if(shared.str("id_str",shared.str("id"))==realId && !shared.isNull("live_type_audio")) {
+                    result.put("live_type_audio",shared.optBoolean("live_type_audio"))
+                }
+            } catch(error: CancellationException) { throw error }
+            catch(error: Exception) {
+                android.util.Log.w("DouyinRoom","房间类型获取失败：${error.javaClass.simpleName}")
+            }
+        }
         return result
     }
     override suspend fun detail(room: Room): Room = metadata(roomData(room),room.id)

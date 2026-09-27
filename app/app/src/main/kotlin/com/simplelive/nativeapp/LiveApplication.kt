@@ -1,8 +1,13 @@
 package com.simplelive.nativeapp
 
 import android.app.Application
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 class LiveApplication : Application() {
+    val applicationScope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
+    val playback by lazy { PlaybackConnection(this) }
     val network by lazy { Network() }
     val storage by lazy { Storage(this) }
     val credentials by lazy { Credentials(this) }

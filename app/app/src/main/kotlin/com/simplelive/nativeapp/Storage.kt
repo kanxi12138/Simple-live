@@ -17,6 +17,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import okhttp3.Cookie
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.security.KeyStore
 import java.util.UUID
 import javax.crypto.Cipher
@@ -26,10 +28,19 @@ import javax.crypto.spec.GCMParameterSpec
 
 private val Context.nativePreferences by preferencesDataStore("preferences")
 
+class DouyinCredentialSnapshot(val cookies: List<Cookie>,val generation: Long) {
+    fun header(url: String): String {
+        val target=url.toHttpUrl()
+        return cookies.filter { it.expiresAt>System.currentTimeMillis() && it.matches(target) }
+            .sortedByDescending { it.path.length }.joinToString("; ") { "${it.name}=${it.value}" }
+    }
+}
+
 /** Credentials never enter the portable configuration or database. */
 class Credentials(context: Context) {
     private val storage = context.getSharedPreferences("encrypted_credentials", Context.MODE_PRIVATE)
     private val keyAlias = "simplelive.credentials.v1"
+    private var douyinGeneration=0L
     @Synchronized private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         return (store.getKey(keyAlias, null) as? SecretKey) ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
@@ -37,7 +48,7 @@ class Credentials(context: Context) {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    @Synchronized fun get(platform: Platform): String {
+    @Synchronized private fun read(platform: Platform): String {
         val value = storage.getString(platform.name, null) ?: return ""
         val bytes = Base64.decode(value, Base64.NO_WRAP)
         require(bytes.size >= 28) { "登录凭证损坏，请重新登录" }
@@ -46,7 +57,16 @@ class Credentials(context: Context) {
         cipher.updateAAD(platform.name.toByteArray())
         return cipher.doFinal(bytes.copyOfRange(12, bytes.size)).toString(Charsets.UTF_8)
     }
+    @Synchronized fun get(platform: Platform): String =
+        if(platform==Platform.DOUYIN) douyinSnapshot().header(platform.home) else read(platform)
+
     @Synchronized fun save(platform: Platform, cookie: String) {
+        require(!cookie.contains('\r') && !cookie.contains('\n') && cookie.length<=64*1024) { "登录凭证格式无效" }
+        write(platform,if(platform==Platform.DOUYIN) encodeCookies(legacyDouyinCookies(cookie)) else cookie)
+        if(platform==Platform.DOUYIN) douyinGeneration++
+    }
+
+    @Synchronized private fun write(platform: Platform, cookie: String) {
         require(!cookie.contains('\r') && !cookie.contains('\n') && cookie.length <= 64 * 1024) { "登录凭证格式无效" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key()); cipher.updateAAD(platform.name.toByteArray())
@@ -60,7 +80,56 @@ class Credentials(context: Context) {
             throw IllegalStateException("登录信息保存失败")
         }
     }
-    @Synchronized fun clear(platform: Platform) { check(storage.edit().remove(platform.name).commit()) { "登录信息清除失败" } }
+    @Synchronized fun clear(platform: Platform) {
+        check(storage.edit().remove(platform.name).commit()) { "登录信息清除失败" }
+        if(platform==Platform.DOUYIN) douyinGeneration++
+    }
+
+    /** Legacy flat Cookie headers remain readable; refreshed cookies retain their scope and expiry. */
+    @Synchronized fun douyinSnapshot(): DouyinCredentialSnapshot {
+        val raw=read(Platform.DOUYIN)
+        val cookies=if(raw.startsWith("{")) JSONObject(raw).arr("cookies").objects().mapNotNull { item ->
+            Cookie.parse(item.getString("url").toHttpUrl(),item.getString("cookie"))
+        } else legacyDouyinCookies(raw)
+        return DouyinCredentialSnapshot(cookies.filter { it.domain=="douyin.com" || it.domain.endsWith(".douyin.com") },douyinGeneration)
+    }
+
+    @Synchronized fun saveDouyinLogin(cookie: String,expectedGeneration: Long) {
+        check(douyinGeneration==expectedGeneration) { "登录会话已改变，请重新打开登录页面" }
+        save(Platform.DOUYIN,cookie)
+    }
+
+    /** Ignore responses from an account that has since logged out or been replaced. */
+    @Synchronized fun updateDouyinCookies(snapshot: DouyinCredentialSnapshot,url: String,setCookies: List<String>) {
+        if(snapshot.generation!=douyinGeneration || snapshot.cookies.isEmpty() || setCookies.isEmpty()) return
+        val target=url.toHttpUrl()
+        if(!target.isHttps || target.host !in listOf("www.douyin.com","live.douyin.com")) return
+        val current=douyinSnapshot().cookies.associateBy { Triple(it.name,it.domain,it.path) }.toMutableMap()
+        val original=snapshot.cookies.associateBy { Triple(it.name,it.domain,it.path) }
+        var changed=false
+        setCookies.forEach { header ->
+            val cookie=Cookie.parse(target,header) ?: return@forEach
+            if(cookie.domain!="douyin.com" && !cookie.domain.endsWith(".douyin.com")) return@forEach
+            val identity=Triple(cookie.name,cookie.domain,cookie.path)
+            // A parallel response may already have refreshed this particular cookie.
+            if(current[identity]!=original[identity]) return@forEach
+            if(cookie.expiresAt<=System.currentTimeMillis()) {
+                if(current.remove(identity)!=null) changed=true
+            } else if(current[identity]!=cookie) { current[identity]=cookie;changed=true }
+        }
+        if(changed) write(Platform.DOUYIN,encodeCookies(current.values.toList()))
+    }
+
+    private fun legacyDouyinCookies(raw: String): List<Cookie> = raw.split(';').mapNotNull { entry ->
+        val pair=entry.trim()
+        if(!pair.contains('=')) null else Cookie.parse("https://www.douyin.com/".toHttpUrl(),
+            "$pair; Domain=.douyin.com; Path=/; Secure")
+    }
+
+    private fun encodeCookies(cookies: List<Cookie>): String = JSONObject().put("version",1)
+        .put("cookies",JSONArray(cookies.map { cookie ->
+            JSONObject().put("url","https://${cookie.domain}${cookie.path}").put("cookie",cookie.toString())
+        })).toString()
 }
 
 @Entity(tableName = "saved_items")

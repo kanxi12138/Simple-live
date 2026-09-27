@@ -40,7 +40,7 @@ private val LightPalette=lightColorScheme(primary=Color(0xff1764d9),onPrimary=Co
 private val DarkPalette=darkColorScheme(primary=Color(0xff91baff),onPrimary=Color(0xff062858),background=Color(0xff101a2a),surface=Color(0xff17263c),onSurface=Color(0xffedf3fc),onBackground=Color(0xffedf3fc),onSurfaceVariant=Color(0xffb1bfd3),surfaceVariant=Color(0xff24354d))
 
 @Composable
-fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolean)->Unit,onVerify: (BiliListChallenge)->Unit) {
+fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolean,Boolean)->Unit,onVerify: (BiliListChallenge)->Unit) {
     val preferences by model.preferences.collectAsStateWithLifecycle()
     val player by model.player.collectAsStateWithLifecycle()
     val ready by model.ready.collectAsStateWithLifecycle()

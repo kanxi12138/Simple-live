@@ -18,6 +18,7 @@ data class Room(
     val extra: Map<String, String> = emptyMap(),
 ) {
     val key: String get() = "${platform.name}:$id"
+    val isAudioLive: Boolean get() = extra["live_type_audio"]=="true"
 }
 data class Choice(val id: String, val name: String)
 data class Playback(
