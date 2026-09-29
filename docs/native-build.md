@@ -18,7 +18,7 @@ Pop-Location
 
 本机 Google Maven 域名解析为回环地址，项目因此配置了阿里云 Google Maven 镜像，Maven Central 继续使用官方仓库；不修改系统 DNS 或 hosts。
 
-安装前以 Android SDK 的 `aapt` 与 `apksigner` 核对新包名 `com.simplelive.nativeapp`、版本 `7.0.8 / 7000008` 和现有 release 证书。ADB 必须显式指定目标设备：
+安装前以 Android SDK 的 `aapt` 与 `apksigner` 核对新包名 `com.simplelive.nativeapp`、版本 `7.0.8 / 7000008` 和现有 release 证书。ADB 必须显式指定目标设备；将以下 `DEVICE_SERIAL` 替换为 `adb devices` 显示的设备序列号，勿将真实设备标识提交到仓库：
 
 ```powershell
 & "$env:LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe" -s DEVICE_SERIAL install -r Simple-live-v7.0.8-native-release.apk
