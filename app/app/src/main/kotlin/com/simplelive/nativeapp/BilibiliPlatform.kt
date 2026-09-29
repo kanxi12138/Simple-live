@@ -101,7 +101,7 @@ class BilibiliPlatform(private val context: Context, private val net: Network, p
             status = when (init.optInt("live_status")) { 1 -> LiveStatus.LIVE; 2 -> LiveStatus.REPLAY; else -> LiveStatus.OFFLINE })
     }
     override suspend fun playback(room: Room, quality: String?, line: String?): Playback {
-        val current = detail(room)
+        val current = room
         if (current.status != LiveStatus.LIVE) throw PlatformException("主播未开播")
         val auth = authHeaders()
         suspend fun play(selected: String?): JSONObject = data("https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo?room_id=${current.realId}&protocol=0,1&format=0,1,2&codec=0&platform=html5&dolby=5" + (selected?.let { "&qn=${encoded(it)}" } ?: ""), auth).path("playurl_info", "playurl")

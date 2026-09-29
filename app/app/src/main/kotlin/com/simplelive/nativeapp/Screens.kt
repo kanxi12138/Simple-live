@@ -14,12 +14,14 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,9 +45,10 @@ private val DarkPalette=darkColorScheme(primary=Color(0xff91baff),onPrimary=Colo
 fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolean,Boolean)->Unit,onVerify: (BiliListChallenge)->Unit) {
     val preferences by model.preferences.collectAsStateWithLifecycle()
     val player by model.player.collectAsStateWithLifecycle()
-    val ready by model.ready.collectAsStateWithLifecycle()
+    val recovery by model.recovery.collectAsStateWithLifecycle()
     val notice by model.notice.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    val pages=rememberSaveableStateHolder()
     val systemDark=isSystemInDarkTheme()
     val dark=when(preferences["theme_preference"]) { "light" -> false; "dark" -> true; else -> systemDark }
     MaterialTheme(colorScheme=if(dark) DarkPalette else LightPalette,typography=Typography(
@@ -54,7 +57,7 @@ fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolea
         val snackbar=remember { SnackbarHostState() }
         LaunchedEffect(notice) { if(notice.isNotBlank()) { snackbar.showSnackbar(notice); if(model.notice.value==notice) model.notice.value="" } }
         Scaffold(snackbarHost={ SnackbarHost(snackbar) },bottomBar={
-            if(player.room==null) NavigationBar(containerColor=MaterialTheme.colorScheme.surface) {
+            if(recovery.ready && player.room==null) NavigationBar(containerColor=MaterialTheme.colorScheme.surface) {
                 listOf(Triple("首页",Icons.Outlined.Home,0),Triple("搜索",Icons.Outlined.Search,1),Triple("关注",Icons.Outlined.FavoriteBorder,2),Triple("设置",Icons.Outlined.Settings,3)).forEach { (label,icon,index)->
                     NavigationBarItem(selected=tab==index,onClick={
                         val enteringFollows=tab!=2 && index==2
@@ -64,14 +67,19 @@ fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolea
                 }
             }
         }) { padding ->
-            if(!ready) Box(Modifier.fillMaxSize().padding(padding),contentAlignment=Alignment.Center) { CircularProgressIndicator() }
+            if(!recovery.ready) Box(Modifier.fillMaxSize().padding(padding).padding(20.dp),contentAlignment=Alignment.Center) {
+                if(recovery.recovering) CircularProgressIndicator()
+                else ErrorCard(recovery.error,model::recoverConfig)
+            }
             else if(player.room!=null) PlayerScreen(model,onFullscreen,onLogin)
-            else Column(Modifier.fillMaxSize().padding(padding)) {
-                when(tab) {
-                    0 -> HomeScreen(model,onLogin,onVerify)
-                    1 -> SearchScreen(model,onLogin)
-                    2 -> FollowsScreen(model)
-                    else -> SettingsScreen(model,onLogin)
+            else pages.SaveableStateProvider(tab) {
+                Column(Modifier.fillMaxSize().padding(padding)) {
+                    when(tab) {
+                        0 -> HomeScreen(model,onLogin,onVerify)
+                        1 -> SearchScreen(model,onLogin)
+                        2 -> FollowsScreen(model)
+                        else -> SettingsScreen(model,onLogin)
+                    }
                 }
             }
         }
@@ -116,7 +124,8 @@ private fun HomeScreen(model: LiveViewModel,onLogin: (Platform)->Unit,onVerify: 
     }
     state.verification?.let { challenge -> TextButton(onClick={onVerify(challenge)},modifier=Modifier.padding(horizontal=16.dp)) { Text("完成B站安全验证") } }
     if(state.needsLogin) TextButton(onClick={onLogin(state.platform)},modifier=Modifier.padding(horizontal=16.dp)) { Text("登录${state.platform.label}后重试") }
-    RoomGrid(state.rooms,state.loading,state.error,state.more,{model.loadRooms(true)},{model.loadRooms()},model::open)
+    RoomGrid(state.rooms,state.loading,state.error,state.more,{model.loadRooms(true)},{model.loadRooms()},model::open,
+        stateKey="${state.platform.name}:${state.category?.level}:${state.category?.parent}:${state.category?.id}:${state.category?.queryId}")
     if(categoryPicker) ModalBottomSheet(onDismissRequest={closeCategories()}) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f).padding(horizontal=20.dp)) {
             Text(if(children==null) "直播分类" else "斗鱼子分类",style=MaterialTheme.typography.headlineSmall)
@@ -149,11 +158,23 @@ private fun SearchScreen(model: LiveViewModel,onLogin: (Platform)->Unit) {
         Spacer(Modifier.weight(1f))
         if(state.platform in listOf(Platform.DOUYIN,Platform.BILIBILI)) TextButton(onClick={onLogin(state.platform)}) { Text("登录") }
     }
-    RoomGrid(state.rooms,state.loading,state.error,state.more,{model.searchRooms(true)},{model.searchRooms()},model::open,emptyText="输入关键词开始搜索")
+    val emptyText=when {
+        state.committed==null -> "输入关键词开始搜索"
+        state.committed?.platform!=Platform.DOUYIN -> "输入关键词开始搜索"
+        state.committed?.accounts==true -> "未找到相关账号"
+        else -> "未找到相关直播"
+    }
+    RoomGrid(state.rooms,state.loading,state.error,state.more,{model.searchRooms(true)},{model.searchRooms()},model::open,emptyText=emptyText,
+        stateKey=state.committed?.let { "${it.platform.name}:${it.accounts}:${it.keyword}" } ?: state.platform.name)
 }
 @Composable
-fun RoomGrid(rooms: List<Room>,loading: Boolean,error: String,more: Boolean,onMore: ()->Unit,onRetry: ()->Unit,onRoom: (Room)->Unit,emptyText: String="暂无直播，请选择其他分类") {
-    LazyVerticalGrid(columns=GridCells.Fixed(2),contentPadding=PaddingValues(16.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
+fun RoomGrid(rooms: List<Room>,loading: Boolean,error: String,more: Boolean,onMore: ()->Unit,onRetry: ()->Unit,onRoom: (Room)->Unit,emptyText: String="暂无直播，请选择其他分类",stateKey: String="") {
+    val grid=rememberLazyGridState()
+    var previousKey by rememberSaveable { mutableStateOf(stateKey) }
+    LaunchedEffect(stateKey) {
+        if(previousKey!=stateKey) { grid.scrollToItem(0);previousKey=stateKey }
+    }
+    LazyVerticalGrid(state=grid,columns=GridCells.Fixed(2),contentPadding=PaddingValues(16.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
         if(error.isNotBlank()) item(span={GridItemSpan(2)}) { ErrorCard(error,onRetry) }
         items(rooms,key={it.key+it.userId}) { room ->
             Column(Modifier.clickable { onRoom(room) }) {
@@ -217,22 +238,27 @@ private fun ColumnScope.FollowsScreen(model: LiveViewModel) {
     HorizontalPager(state=pager,modifier=Modifier.fillMaxWidth().weight(1f),
         userScrollEnabled=selected==null && editFolder==null && !newFolder,verticalAlignment=Alignment.Top) { page ->
         val visible=visibleFollows(page)
+        val followsByKey=visible.associateBy { it.room.key }
+        val followsByFolder=visible.groupBy { it.folder }
+        val foldersById=library.folders.associateBy { it.id }
         LazyColumn(state=lists[page],modifier=Modifier.fillMaxSize(),contentPadding=PaddingValues(bottom=24.dp)) {
             if(visible.isEmpty()) item {
                 Text(if(library.follows.isEmpty()) "在直播间关注主播，即可在这里找到他们。" else if(page==0) "暂无正在直播的关注" else "当前平台暂无关注",
                     Modifier.padding(24.dp),color=MaterialTheme.colorScheme.onSurfaceVariant)
             }
             val topItems=(visible.filter { it.folder.isBlank() }.map { Triple(it.room.key,if(it.pinned) Int.MIN_VALUE else it.position,false) } + library.folders.map { Triple(it.id,it.position,true) }).sortedBy { it.second }
-            items(topItems,key={if(it.third) "folder:${it.first}" else it.first}) { item ->
-                if(!item.third) {
-                    val follow=visible.first { it.room.key==item.first }
-                    FollowRow(follow,{model.open(follow.room)},{managementPage=page;selected=follow})
+            topItems.forEach { entry ->
+                if(!entry.third) {
+                    val follow=followsByKey.getValue(entry.first)
+                    item(key=follow.room.key) { FollowRow(follow,{model.open(follow.room)},{managementPage=page;selected=follow}) }
                 } else {
-                    val folder=library.folders.first { it.id==item.first }
-                    val members=visible.filter { it.folder==folder.id }
-                    ListItem(headlineContent={Text(folder.name,fontWeight=FontWeight.SemiBold)},supportingContent={Text("${members.size} 位主播")},leadingContent={Icon(Icons.Outlined.Folder,null)},
-                        trailingContent={IconButton(onClick={editFolder=folder}){Icon(Icons.Outlined.MoreVert,"管理分组")}},modifier=Modifier.clickable { model.operation { model.storage.folder(folder.copy(expanded=!folder.expanded)) } })
-                    if(folder.expanded) members.forEach { follow -> FollowRow(follow,{model.open(follow.room)},{managementPage=page;selected=follow}) }
+                    val folder=foldersById.getValue(entry.first)
+                    val members=followsByFolder[folder.id].orEmpty()
+                    item(key="folder:${folder.id}") {
+                        ListItem(headlineContent={Text(folder.name,fontWeight=FontWeight.SemiBold)},supportingContent={Text("${members.size} 位主播")},leadingContent={Icon(Icons.Outlined.Folder,null)},
+                            trailingContent={IconButton(onClick={editFolder=folder}){Icon(Icons.Outlined.MoreVert,"管理分组")}},modifier=Modifier.clickable { model.operation { model.storage.folder(folder.copy(expanded=!folder.expanded)) } })
+                    }
+                    if(folder.expanded) items(members,key={it.room.key}) { follow -> FollowRow(follow,{model.open(follow.room)},{managementPage=page;selected=follow}) }
                 }
             }
         }

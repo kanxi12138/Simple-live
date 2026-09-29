@@ -81,13 +81,15 @@ class Updates(context: Context,private val network: Network) {
                 .map { android.util.Base64.encodeToString(it.toByteArray(),android.util.Base64.NO_WRAP) }.toSet()
         require(certificates(archive).isNotEmpty() && certificates(archive)==certificates(installed)) { "更新包签名不匹配" }
     }
-    fun install(file: File) {
-        validate(file)
-        if(Build.VERSION.SDK_INT>=26 && !context.packageManager.canRequestPackageInstalls()) {
-            context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,android.net.Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            throw PlatformException("请允许安装此来源的应用，然后再次点击安装")
+    suspend fun install(file: File) {
+        withContext(Dispatchers.IO) { validate(file) }
+        withContext(Dispatchers.Main.immediate) {
+            if(Build.VERSION.SDK_INT>=26 && !context.packageManager.canRequestPackageInstalls()) {
+                context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,android.net.Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                throw PlatformException("请允许安装此来源的应用，然后再次点击安装")
+            }
+            val uri=FileProvider.getUriForFile(context,"${context.packageName}.fileprovider",file)
+            context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
         }
-        val uri=FileProvider.getUriForFile(context,"${context.packageName}.fileprovider",file)
-        context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }

@@ -13,7 +13,7 @@ data class BrowseState(
     val needsLogin: Boolean=false, val verification: BiliListChallenge?=null, val verificationAppend: Boolean=false,
 )
 data class SearchQuery(val platform: Platform,val keyword: String,val accounts: Boolean)
-data class SearchState(val platform: Platform=Platform.DOUYU,val keyword: String="",val accounts: Boolean=false,val rooms: List<Room> = emptyList(),val loading: Boolean=false,val error: String="",val page: Int=1,val more: Boolean=true,val committed: SearchQuery?=null)
+data class SearchState(val platform: Platform=Platform.DOUYU,val keyword: String="",val accounts: Boolean=false,val rooms: List<Room> = emptyList(),val loading: Boolean=false,val error: String="",val page: Int=1,val more: Boolean=true,val committed: SearchQuery?=null,val credentialGeneration: Long?=null)
 data class PlayerState(val room: Room?=null,val playback: Playback?=null,val loading: Boolean=false,val error: String="",val danmakuStatus: String="",val messages: List<Danmaku> = emptyList(),val revision: Int=0,val needsLogin: Boolean=false)
 
 class LiveViewModel(application: Application) : AndroidViewModel(application) {
@@ -21,7 +21,7 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     val storage=app.storage
     val preferences=storage.preferences.stateIn(viewModelScope,SharingStarted.Eagerly,emptyMap())
     val library=storage.library.stateIn(viewModelScope,SharingStarted.Eagerly,Library())
-    val ready=MutableStateFlow(false)
+    val recovery=storage.recovery
     val notice=MutableStateFlow("")
     val browse=MutableStateFlow(BrowseState())
     val search=MutableStateFlow(SearchState())
@@ -30,6 +30,8 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     private val mutableUpdate=MutableStateFlow(UpdateState(busy=true))
     val update: StateFlow<UpdateState> = mutableUpdate.asStateFlow()
     private var updateJob: Job?=null
+    private var recoveryJob: Job?=null
+    private var initialized=false
     private val screenMessages=MutableSharedFlow<List<Danmaku>>(extraBufferCapacity=8,onBufferOverflow=kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     val overlayMessages: SharedFlow<List<Danmaku>> = screenMessages.asSharedFlow()
     private var subcategoryJob: Job?=null
@@ -47,7 +49,17 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     private val mutableFollowsRefreshing=MutableStateFlow(false)
     val followsRefreshing: StateFlow<Boolean> = mutableFollowsRefreshing.asStateFlow()
     @Volatile private var foreground=true
-    init { operation { storage.recoverImport(); ready.value=true; selectPlatform(Platform.DOUYU) } }
+    init { recoverConfig() }
+    fun recoverConfig() {
+        if(recoveryJob?.isActive==true) return
+        recoveryJob=viewModelScope.launch {
+            try {
+                storage.recoverImport()
+                if(!initialized) { initialized=true;selectPlatform(Platform.DOUYU) }
+            } catch(error: CancellationException) { throw error }
+            catch(error: Exception) { notice.value=errorText(error) }
+        }
+    }
     init {
         viewModelScope.launch {
             player.map { it.room?.key }.distinctUntilChanged().collect { key ->
@@ -89,9 +101,20 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
             finally { mutableUpdate.update { it.copy(busy=false,downloading=false) } }
         }
     }
-    fun installUpdate() = operation { if(!update.value.busy) update.value.file?.let { updater.install(it) } }
+    fun installUpdate() {
+        if(updateJob?.isActive==true) return
+        val file=update.value.file ?: return
+        mutableUpdate.update { it.copy(busy=true) }
+        updateJob=viewModelScope.launch {
+            try { updater.install(file) }
+            catch(error: CancellationException) { throw error }
+            catch(error: Exception) { notice.value=errorText(error) }
+            finally { mutableUpdate.update { it.copy(busy=false) } }
+        }
+    }
     fun operation(block: suspend ()->Unit) { viewModelScope.launch { try { block() } catch(error: CancellationException) { throw error } catch(error: Exception) { notice.value=errorText(error) } } }
     private fun errorText(error: Exception): String = when(error) {
+        is ImportRecoveryException -> error.message.orEmpty()
         is StreamAddressException -> error.message.orEmpty()
         is PlatformException -> error.message ?: "平台暂不可用"
         is IllegalArgumentException -> error.message ?: "数据格式无效"
@@ -179,15 +202,29 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
             searchJob?.cancel();searchGeneration++
             search.update { it.copy(rooms=emptyList(),committed=null,loading=false,error="",page=1,more=false) };return
         }
-        searchJob?.cancel(); val generation=++searchGeneration; val page=if(append) state.page+1 else 1
-        search.update { it.copy(loading=true,error="",committed=query,page=if(append) it.page else 1,rooms=if(append) it.rooms else emptyList()) }
+        val douyin=query.platform==Platform.DOUYIN
+        val credentialGeneration=if(douyin) app.credentials.douyinSessionGeneration() else null
+        val sameQuery=query==state.committed && credentialGeneration==state.credentialGeneration
+        if(douyin && state.loading && sameQuery) return
+        val appendResults=append && sameQuery
+        val keepResults=appendResults || (douyin && sameQuery)
+        searchJob?.cancel(); val generation=++searchGeneration; val page=if(appendResults) state.page+1 else 1
+        search.update { it.copy(loading=true,error="",committed=query,credentialGeneration=credentialGeneration,
+            page=if(keepResults) it.page else 1,rooms=if(keepResults) it.rooms else emptyList(),more=if(douyin) keepResults && it.more else it.more) }
         searchJob=viewModelScope.launch {
             try {
                 val adapter=app.platforms.getValue(query.platform)
                 val rooms=if(query.platform==Platform.DOUYIN) (adapter as DouyinPlatform).searchMode(query.keyword,page,query.accounts) else adapter.search(query.keyword,page)
-                if(generation==searchGeneration) search.update { it.copy(loading=false,rooms=((if(append) it.rooms else emptyList())+rooms).distinctBy { room->room.key+room.userId },page=page,more=rooms.isNotEmpty()) }
+                if(douyin && app.credentials.douyinSessionGeneration()!=credentialGeneration) throw PlatformException("抖音会话已改变，请重新搜索")
+                if(generation==searchGeneration) search.update { it.copy(loading=false,rooms=((if(appendResults) it.rooms else emptyList())+rooms).distinctBy { room->room.key+room.userId },page=page,more=rooms.isNotEmpty()) }
             } catch(error: CancellationException) { throw error }
-            catch(error: Exception) { if(generation==searchGeneration) search.update { it.copy(loading=false,error=errorText(error)) } }
+            catch(error: Exception) {
+                if(generation==searchGeneration) {
+                    val changed=douyin && app.credentials.douyinSessionGeneration()!=credentialGeneration
+                    search.update { it.copy(loading=false,error=if(changed) "抖音会话已改变，请重新搜索" else errorText(error),
+                        rooms=if(changed) emptyList() else it.rooms,more=!changed && it.more) }
+                }
+            }
         }
     }
     fun openRoomId() {

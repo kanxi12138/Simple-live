@@ -53,7 +53,7 @@ class DouyuPlatform(private val net: Network, private val signer: SignatureEngin
             status = if (value.optInt("show_status") == 1 && value.optInt("videoLoop") != 1) LiveStatus.LIVE else LiveStatus.OFFLINE)
     }
     override suspend fun playback(room: Room, quality: String?, line: String?): Playback {
-        val current = detail(room)
+        val current = room
         if (current.status != LiveStatus.LIVE) throw PlatformException("主播未开播")
         val roomId = current.realId
         val script = data("https://www.douyu.com/swf_api/homeH5Enc?rids=$roomId").str("room$roomId")

@@ -32,6 +32,7 @@ interface LivePlatform {
     suspend fun rooms(category: Category?, page: Int): List<Room>
     suspend fun search(keyword: String, page: Int): List<Room>
     suspend fun detail(room: Room): Room
+    /** Receives fresh metadata from detail(), including the resolved room ID and live status. */
     suspend fun playback(room: Room, quality: String?, line: String?): Playback
 }
 fun JSONObject.obj(key: String): JSONObject = optJSONObject(key) ?: JSONObject()

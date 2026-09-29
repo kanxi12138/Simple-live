@@ -46,14 +46,14 @@ class Network {
                     .header("Accept-Language", "zh-CN,zh;q=0.9")
                 headers.forEach { (name, value) -> if (value.isNotEmpty()) builder.header(name, value) }
                 if (body != null) builder.post(body.toRequestBody(contentType.toMediaType()))
-                val response = await(requestClient.newCall(builder.build()))
-                response.use {
+                val payload = readResponse(requestClient.newCall(builder.build())) {
                     if (it.code in listOf(301, 302, 303, 307, 308)) {
                         val next = current.resolve(it.header("Location").orEmpty()) ?: throw PlatformException("重定向无效")
                         if (next.host != current.host || (current.isHttps && !next.isHttps) || next.port !in listOf(80, 443)) {
                             throw PlatformException("平台重定向不受支持")
                         }
                         current = next
+                        null
                     } else {
                         onHeaders(it.headers)
                         if (!it.isSuccessful) throw PlatformException(when(it.code) {
@@ -66,9 +66,10 @@ class Network {
                         // API payloads and protocol frames are bounded; never buffer an endless live stream.
                         source.request(8L * 1024 * 1024 + 1)
                         if (source.buffer.size > 8L * 1024 * 1024) throw PlatformException("平台响应过大")
-                        return@withContext source.readByteArray()
+                        source.readByteArray()
                     }
                 }
+                if(payload != null) return@withContext payload
             }
             throw PlatformException("平台重定向次数过多")
         }
@@ -77,6 +78,27 @@ class Network {
     suspend fun text(url: String, headers: Map<String, String> = emptyMap()): String = request(url, headers).toString(Charsets.UTF_8)
     suspend fun json(url: String, headers: Map<String, String> = emptyMap(), form: String? = null): JSONObject =
         JSONObject(request(url, headers, form?.toByteArray()).toString(Charsets.UTF_8))
+
+    // Keep cancellation attached until the bounded response body has been consumed.
+    private suspend fun <T> readResponse(call: Call,read: (Response)->T): T = suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call,error: IOException) {
+                if(continuation.isActive) continuation.resumeWithException(error)
+            }
+            override fun onResponse(call: Call,response: Response) {
+                try {
+                    val result=response.use {
+                        if(!continuation.isActive) return
+                        read(it)
+                    }
+                    continuation.resume(result)
+                } catch(error: Exception) {
+                    if(continuation.isActive) continuation.resumeWithException(error)
+                }
+            }
+        })
+    }
 
     companion object {
         suspend fun await(call: Call): Response = suspendCancellableCoroutine { continuation ->

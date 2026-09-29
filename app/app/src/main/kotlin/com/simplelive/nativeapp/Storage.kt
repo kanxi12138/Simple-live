@@ -9,10 +9,15 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -94,6 +99,9 @@ class Credentials(context: Context) {
         return DouyinCredentialSnapshot(cookies.filter { it.domain=="douyin.com" || it.domain.endsWith(".douyin.com") },douyinGeneration)
     }
 
+    /** Read the account revision without decrypting credentials on the UI thread. */
+    @Synchronized fun douyinSessionGeneration(): Long = douyinGeneration
+
     @Synchronized fun saveDouyinLogin(cookie: String,expectedGeneration: Long) {
         check(douyinGeneration==expectedGeneration) { "登录会话已改变，请重新打开登录页面" }
         save(Platform.DOUYIN,cookie)
@@ -159,20 +167,40 @@ data class Follow(val room: Room, val folder: String = "", val pinned: Boolean =
 data class Folder(val id: String, val name: String, val expanded: Boolean = true, val position: Int = 0)
 data class Subscription(val platform: Platform, val category: Category, val raw: String, val key: String)
 data class Library(val follows: List<Follow> = emptyList(), val folders: List<Folder> = emptyList(), val subscriptions: List<Subscription> = emptyList())
+data class ImportRecoveryState(val recovering: Boolean=true,val error: String="") {
+    val ready: Boolean get() = !recovering && error.isBlank()
+}
+class ImportRecoveryException(cause: Throwable?=null) : IllegalStateException("配置恢复未完成，请释放存储空间后重试恢复；当前配置暂不可修改",cause)
 
 class Storage(private val context: Context) {
     private val database = androidx.room.Room.databaseBuilder(context, LiveDatabase::class.java, "simplelive.db").build()
     private val dao = database.items()
     private val mutex = Mutex()
+    private val mutableRecovery=MutableStateFlow(ImportRecoveryState())
+    val recovery=mutableRecovery.asStateFlow()
     val preferences: Flow<Map<String, String>> = context.nativePreferences.data.map { values -> values.asMap().entries.associate { it.key.name to it.value.toString() } }
     val library: Flow<Library> = dao.observe().map { records ->
         Library(records.filter { it.kind == "follow" }.map {
             val json = JSONObject(it.payload); Follow(roomFromJson(json), json.str("folder"), json.optBoolean("isPinned"), json.str("displayName"), it.position)
         }, records.filter { it.kind == "folder" }.map { val json = JSONObject(it.payload); Folder(it.key.removePrefix("folder:"), json.str("name"), json.optBoolean("expanded", true), it.position) },
             records.filter { it.kind == "category" }.map { subscription(JSONObject(it.payload)) })
+    }.flowOn(Dispatchers.Default)
+    suspend fun recoverImport() = withContext(Dispatchers.Default) { mutex.withLock {
+        mutableRecovery.value=ImportRecoveryState()
+        try {
+            restorePendingImport()
+            mutableRecovery.value=ImportRecoveryState(recovering=false)
+        } catch(error: CancellationException) { throw error }
+        catch(error: Exception) { throw recoveryFailed(error) }
+    } }
+    private fun recoveryFailed(error: Exception): ImportRecoveryException {
+        val failure=ImportRecoveryException(error)
+        mutableRecovery.value=ImportRecoveryState(recovering=false,error=failure.message.orEmpty())
+        return failure
     }
-    suspend fun recoverImport() = mutex.withLock {
-        restorePendingImport()
+    // Called inside the same mutex as import/recovery, including for queued writes.
+    private fun requireWritable() {
+        if(!recovery.value.ready) throw ImportRecoveryException()
     }
     private suspend fun restorePendingImport() {
         val pending=dao.all().firstOrNull { it.kind=="import_settings" } ?: return
@@ -181,18 +209,21 @@ class Storage(private val context: Context) {
         val records=snapshot.getJSONArray("records").objects().map { SavedItem(it.getString("key"),it.getString("kind"),it.getString("payload"),it.getInt("position")) }
         database.withTransaction { dao.clear();dao.putAll(records) }
     }
-    suspend fun preference(key: String, value: String) = mutex.withLock { context.nativePreferences.edit { it[stringPreferencesKey(key)] = value } }
+    suspend fun preference(key: String, value: String) = mutex.withLock { requireWritable(); context.nativePreferences.edit { it[stringPreferencesKey(key)] = value } }
     suspend fun follow(room: Room) = mutex.withLock {
+        requireWritable()
         val existing = dao.all().firstOrNull { it.key == room.key }
         if (existing == null) dao.put(SavedItem(room.key, "follow", room.toJson().put("followedAt", System.currentTimeMillis()).toString(), (dao.all().maxOfOrNull { it.position } ?: -1)+1))
     }
-    suspend fun unfollow(room: Room) = mutex.withLock { dao.remove(room.key) }
+    suspend fun unfollow(room: Room) = mutex.withLock { requireWritable(); dao.remove(room.key) }
     suspend fun editFollow(follow: Follow) = mutex.withLock {
+        requireWritable()
         val record=dao.all().firstOrNull { it.key==follow.room.key && it.kind=="follow" } ?: return@withLock
         val payload=JSONObject(record.payload).put("folder",follow.folder).put("isPinned",follow.pinned).put("displayName",follow.displayName)
         dao.put(record.copy(payload=payload.toString()))
     }
     suspend fun refreshRoom(key: String, room: Room) = mutex.withLock {
+        requireWritable()
         val record=dao.all().firstOrNull { it.key==key && it.kind=="follow" } ?: return@withLock
         val previous=JSONObject(record.payload)
         val updated=room.toJson()
@@ -201,17 +232,20 @@ class Storage(private val context: Context) {
         dao.put(record.copy(payload=previous.toString()))
     }
     suspend fun folder(folder: Folder) = mutex.withLock {
+        requireWritable()
         val records=dao.all()
         val position=records.firstOrNull { it.key=="folder:${folder.id}" }?.position ?: ((records.maxOfOrNull { it.position } ?: -1)+1)
         dao.put(SavedItem("folder:${folder.id}", "folder", JSONObject().put("id",folder.id).put("name", folder.name).put("expanded", folder.expanded).toString(), position))
     }
     suspend fun deleteFolder(folder: Folder) = mutex.withLock {
+        requireWritable()
         database.withTransaction {
             dao.remove("folder:${folder.id}")
             dao.all().filter { it.kind == "follow" }.forEach { item -> val json = JSONObject(item.payload); if(json.str("folder")==folder.id) dao.put(item.copy(payload=json.put("folder", "").toString())) }
         }
     }
     suspend fun swap(first: String, second: String) = mutex.withLock {
+        requireWritable()
         database.withTransaction {
             val records=dao.all(); val left=records.firstOrNull { it.key==first } ?: return@withTransaction
             val right=records.firstOrNull { it.key==second } ?: return@withTransaction
@@ -219,6 +253,7 @@ class Storage(private val context: Context) {
         }
     }
     suspend fun swapFollows(first: Follow, second: Follow) = mutex.withLock {
+        requireWritable()
         database.withTransaction {
             val records=dao.all()
             val left=records.firstOrNull { it.key==first.room.key && it.kind=="follow" } ?: return@withTransaction
@@ -232,6 +267,7 @@ class Storage(private val context: Context) {
         }
     }
     suspend fun subscribe(platform: Platform, category: Category) = mutex.withLock {
+        requireWritable()
         val raw = JSONObject().put("platform",platform.name.lowercase()).put("categoryLevel",if(category.level==3) "cate3" else "cate2")
             .put("cate2Name",category.name).put("cate2Id",if(category.level==3) category.parent else category.id).put("cate1Name",category.parent)
             .put("douyuShortName",category.queryId)
@@ -241,7 +277,7 @@ class Storage(private val context: Context) {
         raw.put("key",key)
         if(dao.all().any { it.key=="category:$key" }) dao.remove("category:$key") else dao.put(SavedItem("category:$key","category",raw.toString(),dao.all().size))
     }
-    suspend fun removeSubscription(key: String) = mutex.withLock { dao.remove("category:$key") }
+    suspend fun removeSubscription(key: String) = mutex.withLock { requireWritable(); dao.remove("category:$key") }
     private fun subscription(raw: JSONObject): Subscription {
         val platform=Platform.valueOf(raw.getString("platform").uppercase())
         val level=if(raw.str("categoryLevel")=="cate3") 3 else 2
@@ -256,25 +292,28 @@ class Storage(private val context: Context) {
     }
     private val libraryKeys=setOf("followedStreamers","followFolders","followPinnedKeys","followListOrder","dtv_custom_categories_v1","dtv_custom_categories_v2")
     private fun portableKey(key: String): Boolean = key in libraryKeys || key in setOf("danmu_block_keywords","dtv_danmu_preferences_v1","dtv_player_danmu_collapsed","dtv_player_volume_v1","theme_preference") || Regex("(DOUYU|HUYA|DOUYIN|BILIBILI)_preferred_(quality|line)").matches(key)
-    suspend fun export(): String = mutex.withLock {
-        restorePendingImport()
+    suspend fun export(): String = withContext(Dispatchers.Default) { mutex.withLock {
+        requireWritable()
         val records=dao.all(); val lib=library.first(); val entries=JSONObject()
+        val recordsByKey=records.associateBy { it.key }
+        val followsByFolder=lib.follows.groupBy { it.folder }
         preferences.first().filterKeys(::portableKey).forEach { (key,value) -> entries.put(key,value) }
-        entries.put("followedStreamers",JSONArray(lib.follows.map { follow -> JSONObject(records.first { it.key==follow.room.key }.payload).apply { remove("folder") } }).toString())
-        val folderValues=lib.folders.map { folder -> JSONObject().put("id",folder.id).put("name",folder.name).put("expanded",folder.expanded).put("streamerIds",JSONArray(lib.follows.filter { it.folder==folder.id }.map { it.room.key })) }
+        entries.put("followedStreamers",JSONArray(lib.follows.map { follow -> JSONObject(recordsByKey.getValue(follow.room.key).payload).apply { remove("folder") } }).toString())
+        val folderValues=lib.folders.map { folder -> JSONObject().put("id",folder.id).put("name",folder.name).put("expanded",folder.expanded).put("streamerIds",JSONArray(followsByFolder[folder.id].orEmpty().map { it.room.key })) }
+        val foldersByKey=folderValues.associateBy { "folder:${it.str("id")}" }
         entries.put("followFolders",JSONArray(folderValues).toString())
         entries.put("followPinnedKeys",JSONArray(lib.follows.filter { it.pinned }.map { it.room.key }).toString())
         entries.put("followListOrder",JSONArray(records.filter { it.kind=="follow" || it.kind=="folder" }.map { record ->
-            val data=if(record.kind=="folder") folderValues.first { "folder:${it.str("id")}"==record.key } else JSONObject(record.payload).apply { remove("folder") }
+            val data=if(record.kind=="folder") foldersByKey.getValue(record.key) else JSONObject(record.payload).apply { remove("folder") }
             JSONObject().put("type",if(record.kind=="follow") "streamer" else "folder").put("data",data)
         }).toString())
         entries.put("dtv_custom_categories_v2",JSONArray(lib.subscriptions.map { JSONObject(it.raw) }).toString())
         JSONObject().put("kind","dtv-config").put("version",1).put("exportedAt",java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX",java.util.Locale.ROOT).format(java.util.Date()))
             .put("source",JSONObject().put("client","android-native").put("appVersion",BuildConfig.VERSION_NAME)).put("entries",entries).toString(2)
-    }
+    } }
     /** Validate before mutation; the rollback journal survives interruptions across both stores. */
-    suspend fun importConfig(text: String) = mutex.withLock {
-        restorePendingImport()
+    suspend fun importConfig(text: String) = withContext(Dispatchers.Default) { mutex.withLock {
+        requireWritable()
         require(text.length <= 4 * 1024 * 1024) { "配置文件过大" }
         val payload=JSONObject(text)
         require(payload.str("kind")=="dtv-config" && payload.optInt("version")==1) { "不支持的配置版本" }
@@ -311,14 +350,21 @@ class Storage(private val context: Context) {
             if(value.category.level==3) require(raw.str("cate3Name").isNotBlank())
         }
         validatePreferences(entries)
+        val pinnedKeys=pinned.strings().toSet()
+        val orderPositions=mutableMapOf<String,Int>()
+        order.forEachIndexed { index,key -> orderPositions.putIfAbsent(key,index) }
+        val memberFolders=mutableMapOf<String,Int>()
+        folders.forEachIndexed { index,folder -> folder.arr("streamerIds").strings().forEach { member -> memberFolders.putIfAbsent(member,index) } }
         val records=mutableListOf<SavedItem>()
         follows.forEachIndexed { index,value ->
             val key=roomFromJson(value).key
-            val folder=folders.firstOrNull { it.arr("streamerIds").strings().any { member -> member==key || member==value.str("id") } }?.str("id").orEmpty()
-            value.put("folder",folder).put("isPinned",key in pinned.strings() || value.optBoolean("isPinned"))
-            records += SavedItem(key,"follow",value.toString(),order.indexOf(key).takeIf { it>=0 } ?: (order.size+index))
+            // Legacy backups may use bare room IDs; preserve the first matching folder.
+            val folderIndex=listOfNotNull(memberFolders[key],memberFolders[value.str("id")]).minOrNull()
+            val folder=folderIndex?.let { folders[it].str("id") }.orEmpty()
+            value.put("folder",folder).put("isPinned",key in pinnedKeys || value.optBoolean("isPinned"))
+            records += SavedItem(key,"follow",value.toString(),orderPositions[key] ?: (order.size+index))
         }
-        folders.forEachIndexed { index,value -> val key="folder:${value.str("id")}"; records += SavedItem(key,"folder",value.toString(),order.indexOf(key).takeIf { it>=0 } ?: (order.size+follows.size+index)) }
+        folders.forEachIndexed { index,value -> val key="folder:${value.str("id")}"; records += SavedItem(key,"folder",value.toString(),orderPositions[key] ?: (order.size+follows.size+index)) }
         categories.forEachIndexed { index,value -> val category=subscription(value); records += SavedItem("category:${category.key}","category",value.toString(),index) }
         val settings=JSONObject(); entries.keys().forEach { key -> if(key !in libraryKeys) settings.put(key,entries.getString(key)) }
         val previous=JSONObject().put("preferences",JSONObject(preferences.first())).put("records",JSONArray(dao.all().map {
@@ -329,11 +375,11 @@ class Storage(private val context: Context) {
             database.withTransaction { dao.clear(); dao.putAll(records) }
             try { replacePreferences(settings); dao.remove("pending-import") }
             catch(error: Exception) {
-                try { restorePendingImport() } catch(recoveryError: Exception) { throw IllegalStateException("导入恢复未完成，请释放存储空间并重新启动应用",recoveryError) }
+                try { restorePendingImport() } catch(recoveryError: Exception) { throw recoveryFailed(recoveryError) }
                 throw IllegalStateException("导入失败，原配置已恢复",error)
             }
         }
-    }
+    } }
     private suspend fun replacePreferences(values: JSONObject) { context.nativePreferences.edit { stored -> stored.clear(); values.keys().forEach { stored[stringPreferencesKey(it)] = values.getString(it) } } }
     private fun validatePreferences(entries: JSONObject) {
         if(entries.has("theme_preference")) require(entries.getString("theme_preference") in listOf("light","dark","system"))
