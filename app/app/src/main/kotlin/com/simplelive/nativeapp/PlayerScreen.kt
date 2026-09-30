@@ -48,6 +48,7 @@ fun PlayerScreen(model: LiveViewModel,onFullscreen: (Boolean,Boolean)->Unit,onLo
     val playbackStatus by model.app.playback.status.collectAsStateWithLifecycle()
     val audioOnly=room.isAudioLive || playbackStatus.audioOnly
     var fullscreen by remember { mutableStateOf(false) }
+    var landscape by remember(room.key) { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var interaction by remember { mutableIntStateOf(0) }
     val activePlayer=playbackStatus.player
@@ -61,7 +62,11 @@ fun PlayerScreen(model: LiveViewModel,onFullscreen: (Boolean,Boolean)->Unit,onLo
     fun leave() { onFullscreen(false,false); fullscreen=false;model.closePlayer() }
     BackHandler { if(panel.isNotBlank()) { panel="";interaction++ } else if(fullscreen) { fullscreen=false } else leave() }
     DisposableEffect(Unit) { onDispose { onFullscreen(false,false) } }
-    LaunchedEffect(fullscreen,playbackStatus.landscape,audioOnly) { onFullscreen(fullscreen,playbackStatus.landscape && !audioOnly) }
+    LaunchedEffect(fullscreen,playbackStatus.landscape,audioOnly,room.key) {
+        // Reloading clears video dimensions; keep the room's last confirmed orientation.
+        if(audioOnly) landscape=false else playbackStatus.landscape?.let { landscape=it }
+        onFullscreen(fullscreen,landscape)
+    }
     LaunchedEffect(playing,playbackFailed,state.error) {
         if(!playing || playbackFailed || state.error.isNotBlank()) controlsVisible=true
     }

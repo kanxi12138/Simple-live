@@ -39,7 +39,8 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 
-data class PlaybackStatus(val player: Player?=null,val playing: Boolean=false,val landscape: Boolean=false,val audioOnly: Boolean=false,val error: String="",val audioStatus: String="")
+// A null landscape means video orientation is not yet known.
+data class PlaybackStatus(val player: Player?=null,val playing: Boolean=false,val landscape: Boolean?=null,val audioOnly: Boolean=false,val error: String="",val audioStatus: String="")
 
 // Application-scoped connection keeps the session bound when the Activity is recreated.
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -286,7 +287,11 @@ class LivePlaybackService : MediaSessionService() {
             else -> "播放失败（${error.errorCodeName}），可刷新或切换线路"
         }
         app.playback.status.value=PlaybackStatus(player,player.playWhenReady,
-            !audioOnly && hasVideo && size.width>0 && size.height>0 && size.width*size.pixelWidthHeightRatio>=size.height,
+            when {
+                audioOnly -> false
+                hasVideo && size.width>0 && size.height>0 -> size.width*size.pixelWidthHeightRatio>=size.height
+                else -> null
+            },
             audioOnly,message,if(audioOnly) audioStatus else "")
     }
 
