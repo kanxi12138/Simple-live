@@ -8,6 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -26,6 +28,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -59,6 +62,23 @@ fun PlayerScreen(model: LiveViewModel,onFullscreen: (Boolean,Boolean)->Unit,onLo
     val settings=remember(preferences["dtv_danmu_preferences_v1"]) { DanmakuSettings.from(preferences["dtv_danmu_preferences_v1"]) }
     val words=remember(preferences["danmu_block_keywords"]) { JSONArray(preferences["danmu_block_keywords"] ?: "[]").strings() }
     val messages=remember(state.messages,words) { state.messages.filter { message -> words.none { word -> word.isNotBlank() && message.text.contains(word,true) } } }
+    val messageListState=key(room.key,state.revision) { rememberLazyListState() }
+    var followLatest by remember(room.key,state.revision) { mutableStateOf(true) }
+    LaunchedEffect(messageListState) {
+        launch {
+            messageListState.interactionSource.interactions.collect { interaction ->
+                if(interaction is DragInteraction.Start) followLatest=false
+            }
+        }
+        snapshotFlow {
+            !messageListState.isScrollInProgress && messageListState.firstVisibleItemIndex==0 &&
+                messageListState.firstVisibleItemScrollOffset==0
+        }.collect { atLatest -> if(atLatest) followLatest=true }
+    }
+    LaunchedEffect(messageListState,messages.lastOrNull()?.id,followLatest,fullscreen,preferences["dtv_player_danmu_collapsed"]) {
+        // Explicitly follow new messages instead of preserving the old first item's key.
+        if(followLatest && messages.isNotEmpty()) messageListState.requestScrollToItem(0)
+    }
     fun leave() { onFullscreen(false,false); fullscreen=false;model.closePlayer() }
     BackHandler { if(panel.isNotBlank()) { panel="";interaction++ } else if(fullscreen) { fullscreen=false } else leave() }
     DisposableEffect(Unit) { onDispose { onFullscreen(false,false) } }
@@ -117,7 +137,7 @@ fun PlayerScreen(model: LiveViewModel,onFullscreen: (Boolean,Boolean)->Unit,onLo
                     if(room.platform==Platform.DOUYIN) TextButton(onClick=model::reconnectDanmaku,enabled=state.playback!=null){Text("重连弹幕")}
                     TextButton(onClick={model.setPreference("dtv_player_danmu_collapsed",(!(preferences["dtv_player_danmu_collapsed"]=="true")).toString())}){Text(if(preferences["dtv_player_danmu_collapsed"]=="true") "展开" else "收起")}
                 }
-                if(preferences["dtv_player_danmu_collapsed"]!="true") LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal=20.dp),reverseLayout=true,contentPadding=PaddingValues(bottom=12.dp)) {
+                if(preferences["dtv_player_danmu_collapsed"]!="true") LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal=20.dp),state=messageListState,reverseLayout=true,contentPadding=PaddingValues(bottom=12.dp)) {
                     items(messages.asReversed(),key={it.id}) { message -> Row(Modifier.padding(vertical=5.dp)) { Text(message.user+"  ",color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.bodySmall);Text(message.text,style=MaterialTheme.typography.bodyMedium) } }
                     if(messages.isEmpty()) item { Text("等待直播间弹幕",Modifier.padding(vertical=20.dp),color=MaterialTheme.colorScheme.onSurfaceVariant) }
                 }

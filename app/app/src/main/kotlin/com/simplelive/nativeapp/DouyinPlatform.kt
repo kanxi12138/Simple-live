@@ -3,6 +3,9 @@ package com.simplelive.nativeapp
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -17,12 +20,15 @@ import java.security.SecureRandom
 const val DOUYIN_UA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36 Core/1.116.567.400 QQBrowser/19.7.6764.400"
 fun cookieValue(cookie: String, name: String): String = cookie.split(';').map { it.trim() }.firstOrNull { it.startsWith("$name=") }?.substringAfter('=').orEmpty()
 
+class DouyinSearchVerificationRequired : PlatformException("抖音要求验证本次搜索，请完成官方验证后重试")
+
 class DouyinPlatform(private val context: Context, private val net: Network, private val credentials: Credentials) : LivePlatform {
     private var guestCookie: String = ""
     private var guestGeneration=-1L
     private data class SearchSession(val generation: Long,val cookies: List<Cookie>,val savedCookies: List<Cookie>,val webId: String="",val fallbackToken: String="")
     private val searchMutex=Mutex()
     @Volatile private var searchSession: SearchSession?=null
+    data class SearchResult(val rooms: List<Room>,val hasMore: Boolean,val nextOffset: Int)
     suspend fun authHeaders(refreshGuest: Boolean = false,url: String=Platform.DOUYIN.home,snapshot: DouyinCredentialSnapshot=credentials.douyinSnapshot()): Map<String, String> {
         val target=url.toHttpUrl()
         require(target.isHttps && target.host in listOf("www.douyin.com","live.douyin.com")) { "抖音会话地址不受支持" }
@@ -82,7 +88,7 @@ class DouyinPlatform(private val context: Context, private val net: Network, pri
         return previous.copy(cookies=mergeSearchCookies(retained,changed.mapNotNull { current[it] }),savedCookies=snapshot.cookies)
     }
 
-    private suspend fun searchRequest(url: String,session: SearchSession,headers: Map<String,String>): String {
+    private suspend fun searchRequest(url: String,session: SearchSession,headers: Map<String,String>,stage: String,attempt: Int): String {
         val snapshot=DouyinCredentialSnapshot(session.savedCookies,session.generation)
         checkSearchSession(session.generation)
         val result=net.request(url,headers+("Cookie" to searchCookieHeader(session,url)),onHeaders={ response ->
@@ -92,21 +98,64 @@ class DouyinPlatform(private val context: Context, private val net: Network, pri
             // Guest responses also refresh the in-memory jar; they never create an account login.
             val cookies=updates.mapNotNull { Cookie.parse(url.toHttpUrl(),it) }
             searchSession=session.copy(cookies=mergeSearchCookies(session.cookies,cookies))
-        }).toString(Charsets.UTF_8)
+        },requestClient=net.client.newBuilder().addNetworkInterceptor { chain ->
+            chain.proceed(chain.request()).also { LiveDiagnostics.record("DouyinSearch","stage=$stage http=${it.code} retry=$attempt") }
+        }.build()).toString(Charsets.UTF_8)
         checkSearchSession(session.generation)
         return result
     }
 
+    private suspend fun searchStage(stage: String,generation: Long,optional: Boolean=false,request: suspend (Int)->String): String {
+        for(attempt in 0..1) {
+            currentCoroutineContext().ensureActive()
+            checkSearchSession(generation)
+            try {
+                val result=request(attempt)
+                currentCoroutineContext().ensureActive()
+                checkSearchSession(generation)
+                return result
+            }
+            catch(error: PlatformException) {
+                checkSearchSession(generation)
+                if(error.httpStatus !in listOf(502,503,504)) throw error
+                if(optional) {
+                    LiveDiagnostics.record("DouyinSearch","stage=$stage event=skip_optional http=${error.httpStatus}")
+                    return ""
+                }
+                if(attempt==1) throw PlatformException("抖音搜索${stage}失败（HTTP ${error.httpStatus}），请稍后重试",error.code,error.httpStatus)
+                delay(1000)
+            }
+        }
+        error("Unreachable search attempt")
+    }
+
     private suspend fun prepareSearchSession(url: String,referer: String): SearchSession {
         var session=currentSearchSession(credentials.douyinSnapshot())
+        val generation=session.generation
         searchSession=session
         fun webId(): String = cookieValue(searchCookieHeader(session,url),"webid")
             .takeIf { it.matches(Regex("[0-9]{1,20}")) && it.any { digit -> digit!='0' } }.orEmpty()
         session=session.copy(webId=webId().ifBlank { session.webId })
         val cookie=searchCookieHeader(session,url)
         if(session.webId.isBlank() || cookieValue(cookie,"ttwid").isBlank() || cookieValue(cookie,"msToken").isBlank()) {
-            val html=searchRequest("https://www.douyin.com/",session,mapOf("User-Agent" to DOUYIN_UA,
-                "Accept" to "text/html,application/xhtml+xml","Referer" to referer))
+            if(session.webId.isBlank() || cookieValue(cookie,"ttwid").isBlank()) {
+                val html=searchStage("访客初始化",session.generation) { attempt ->
+                    session=currentSearchSession(credentials.douyinSnapshot())
+                    checkSearchSession(generation)
+                    searchRequest(Platform.DOUYIN.home,session,mapOf("User-Agent" to DOUYIN_UA,
+                        "Accept" to "text/html,application/xhtml+xml","Referer" to Platform.DOUYIN.home),"访客初始化",attempt)
+                }
+                session=currentSearchSession(credentials.douyinSnapshot())
+                session=session.copy(webId=webId().ifBlank { DouyinSession.visitor(html)?.id.orEmpty() }.ifBlank { session.webId })
+                searchSession=session
+            }
+            val hasIdentity=session.webId.isNotBlank() && cookieValue(searchCookieHeader(session,url),"ttwid").isNotBlank()
+            val html=searchStage("搜索页准备",session.generation,optional=hasIdentity) { attempt ->
+                session=currentSearchSession(credentials.douyinSnapshot())
+                checkSearchSession(generation)
+                searchRequest(referer,session,mapOf("User-Agent" to DOUYIN_UA,
+                    "Accept" to "text/html,application/xhtml+xml","Referer" to referer),"搜索页准备",attempt)
+            }
             session=currentSearchSession(credentials.douyinSnapshot())
             session=session.copy(webId=webId().ifBlank { DouyinSession.visitor(html)?.id.orEmpty() }.ifBlank { session.webId })
         }
@@ -171,56 +220,85 @@ class DouyinPlatform(private val context: Context, private val net: Network, pri
         return signedData("https://live.douyin.com/webcast/web/partition/detail/room/v2/",values).arr("data").objects().map { metadata(it.obj("room"),it.str("web_rid")) }
     }
     override suspend fun search(keyword: String, page: Int): List<Room> = searchMode(keyword,page,false)
-    suspend fun searchMode(keyword: String, page: Int, accounts: Boolean): List<Room> = searchMutex.withLock {
-        try { searchPage(keyword,page,accounts) }
+    suspend fun searchMode(keyword: String, page: Int, accounts: Boolean): List<Room> = searchResults(keyword,(page-1)*10,accounts).rooms
+    suspend fun searchResults(keyword: String, offset: Int, accounts: Boolean): SearchResult = searchMutex.withLock {
+        try { searchPage(keyword,offset,accounts) }
         catch(error: PlatformException) {
             android.util.Log.w("DouyinSearch","mode=${if(accounts) "account" else "live"} http=${error.httpStatus} code=${error.code}")
             throw error
         }
     }
-    private suspend fun searchPage(keyword: String,page: Int,accounts: Boolean): List<Room> {
+    private suspend fun searchPage(keyword: String,offset: Int,accounts: Boolean): SearchResult {
         val endpoint=if(accounts) "discover/search" else "live/search"
         val url="https://www.douyin.com/aweme/v1/web/$endpoint/"
         val referer="https://www.douyin.com/search/${encoded(keyword)}?type=${if(accounts) "user" else "live"}"
-        val session=prepareSearchSession(url,referer)
+        var session=prepareSearchSession(url,referer)
+        val generation=session.generation
+        val body=searchStage("搜索接口",session.generation) { attempt ->
+        session=currentSearchSession(credentials.douyinSnapshot())
+        checkSearchSession(generation)
         val token=cookieValue(searchCookieHeader(session,url),"msToken")
-        val values=listOf("device_platform" to "webapp","aid" to "6383","channel" to "channel_pc_web","search_channel" to if(accounts) "aweme_user_web" else "aweme_live","keyword" to keyword,"search_source" to if(accounts) "normal_search" else "switch_tab","query_correct_type" to "1","is_filter_search" to "0","from_group_id" to "","offset" to ((page-1)*10).toString(),"count" to "10","pc_client_type" to "1","version_code" to "170400","version_name" to "17.4.0","cookie_enabled" to "true","screen_width" to "1920","screen_height" to "1080","browser_language" to "zh-CN","browser_platform" to "Win32","browser_name" to "QQBrowser","browser_version" to "19.7.6764.400","browser_online" to "true","engine_name" to "Blink","engine_version" to "116.0.5845.97","os_name" to "Windows","os_version" to "10","cpu_core_num" to "12","device_memory" to "8","platform" to "PC","webid" to session.webId,"disable_rs" to "0","need_filter_settings" to "1","list_type" to "single","msToken" to token)
+        val accountSession=listOf("sessionid","sessionid_ss","sid_guard").any {
+            cookieValue(searchCookieHeader(session,url),it).isNotBlank()
+        }
+        LiveDiagnostics.record("DouyinSearch","event=request account_session=$accountSession offset=$offset")
+        val values=listOf("device_platform" to "webapp","aid" to "6383","channel" to "channel_pc_web","search_channel" to if(accounts) "aweme_user_web" else "aweme_live","keyword" to keyword,"search_source" to if(accounts) "normal_search" else "switch_tab","query_correct_type" to "1","is_filter_search" to "0","from_group_id" to "","offset" to offset.toString(),"count" to "10","pc_client_type" to "1","version_code" to "170400","version_name" to "17.4.0","cookie_enabled" to "true","screen_width" to "1920","screen_height" to "1080","browser_language" to "zh-CN","browser_platform" to "Win32","browser_name" to "QQBrowser","browser_version" to "19.7.6764.400","browser_online" to "true","engine_name" to "Blink","engine_version" to "116.0.5845.97","os_name" to "Windows","os_version" to "10","cpu_core_num" to "12","device_memory" to "8","platform" to "PC","webid" to session.webId,"disable_rs" to "0","need_filter_settings" to "1","list_type" to "single","msToken" to token)
         val parameters=query(*values.toTypedArray())
         val signature=withContext(Dispatchers.Default) { DouyinSigning.generate(parameters,DOUYIN_UA) }
-        val body=searchRequest("$url?$parameters&a_bogus=${encoded(signature)}",session,mapOf("User-Agent" to DOUYIN_UA,
-            "Accept" to "application/json, text/plain, */*","Origin" to "https://www.douyin.com","Referer" to referer))
+        searchRequest("$url?$parameters&a_bogus=${encoded(signature)}",session,mapOf("User-Agent" to DOUYIN_UA,
+            "Accept" to "application/json, text/plain, */*","Origin" to "https://www.douyin.com","Referer" to referer),"搜索接口",attempt)
+        }
         val result=try { JSONObject(body) } catch(error: JSONException) {
             throw PlatformException("抖音搜索返回了无效响应，可能受到平台限制，请稍后重试")
         }
         val code=result.optInt("status_code",-1)
         val list=result.opt(if(accounts) "user_list" else "data")
         val listType=when(list) { null -> "missing"; JSONObject.NULL -> "null"; else -> list.javaClass.simpleName }
-        android.util.Log.i("DouyinSearch","mode=${if(accounts) "account" else "live"} code=$code list=$listType received=${(list as? JSONArray)?.length() ?: -1}")
+        LiveDiagnostics.record("DouyinSearch","mode=${if(accounts) "account" else "live"} code=$code list=$listType received=${(list as? JSONArray)?.length() ?: -1}")
         if(code!=0) throw PlatformException(if(code == -101) "抖音登录已失效，请重新登录" else "抖音搜索被平台拒绝（$code），请稍后重试；如官方页面要求验证，请先完成验证",code)
         val verification=result.opt("verify_check_info")
         val hasVerification=(verification is JSONObject && verification.length()>0) ||
             (verification is String && verification.isNotBlank() && verification.trim() !in listOf("{}","null"))
-        if(hasVerification && (list !is JSONArray || list.length()==0)) {
-            throw PlatformException("抖音搜索返回了验证信息，暂无法确认结果，请打开官方页面检查后重试")
+        val nilInfo=result.optJSONObject("search_nil_info")
+        // Search can report verification as a successful response with an empty list.
+        val nilVerification=listOf("search_nil_type","search_nil_item").any { nilInfo?.optString(it)=="verify_check" }
+        if(nilVerification || (hasVerification && (list !is JSONArray || list.length()==0))) {
+            LiveDiagnostics.record("DouyinSearch","event=verification_required nil_info=$nilVerification")
+            throw DouyinSearchVerificationRequired()
         }
         if(list !is JSONArray) throw PlatformException("抖音搜索未返回有效结果列表，请稍后重试")
+        val dropped=linkedMapOf<String,Int>()
+        fun drop(reason: String): Room? { dropped[reason]=(dropped[reason] ?: 0)+1;return null }
         val rooms=(0 until list.length()).mapNotNull { index ->
             try {
                 val entry=list.getJSONObject(index)
-                if(accounts) searchAccount(entry) else {
+                if(accounts) {
+                    val user=entry.optJSONObject("user_info")
+                    when {
+                        user==null -> drop("missing_user_info")
+                        searchIdentifier(user,"uid","id_str","id").isBlank() -> drop("missing_account_identity")
+                        else -> searchAccount(entry)
+                    }
+                } else {
                     val raw=entry.getJSONObject("lives").get("rawdata")
                     val room=when(raw) { is JSONObject -> raw; is String -> JSONObject(raw); else -> throw JSONException("Invalid room") }
                     val realId=searchIdentifier(room,"id_str","id")
                     val webId=searchIdentifier(room.obj("owner"),"web_rid")
-                    if(realId.isBlank() && webId.isBlank()) null else metadata(room,webId.ifBlank { realId })
+                    if(realId.isBlank() && webId.isBlank()) drop("missing_room_identity") else metadata(room,webId.ifBlank { realId })
                         .copy(id=webId.ifBlank { realId },realId=realId.ifBlank { webId })
                 }
-            } catch(error: JSONException) { null }
+            } catch(error: JSONException) { drop("invalid_entry_payload") }
         }
-        android.util.Log.i("DouyinSearch","mode=${if(accounts) "account" else "live"} code=$code received=${list.length()} parsed=${rooms.size}")
+        val hasMore=when(val more=result.opt("has_more")) {
+            is Boolean -> more
+            else -> more?.toString()?.toIntOrNull()?.let { it!=0 } ?: (list.length()>0)
+        }
+        val nextOffset=result.opt("cursor")?.toString()?.toIntOrNull()?.takeIf { it>offset }
+            ?: (offset+list.length().coerceAtLeast(10))
+        LiveDiagnostics.record("DouyinSearch","mode=${if(accounts) "account" else "live"} code=$code received=${list.length()} parsed=${rooms.size} dropped=$dropped offset=$offset next_offset=$nextOffset has_more=$hasMore")
         if(list.length()>0 && rooms.isEmpty()) throw PlatformException("抖音搜索结果无法解析，请稍后重试")
         checkSearchSession(session.generation)
-        return rooms
+        return SearchResult(rooms,hasMore,nextOffset)
     }
 
     private fun searchIdentifier(value: JSONObject,vararg keys: String): String = keys.asSequence().map { value.str(it) }

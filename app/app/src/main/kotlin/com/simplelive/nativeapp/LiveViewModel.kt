@@ -13,7 +13,7 @@ data class BrowseState(
     val needsLogin: Boolean=false, val verification: BiliListChallenge?=null, val verificationAppend: Boolean=false,
 )
 data class SearchQuery(val platform: Platform,val keyword: String,val accounts: Boolean)
-data class SearchState(val platform: Platform=Platform.DOUYU,val keyword: String="",val accounts: Boolean=false,val rooms: List<Room> = emptyList(),val loading: Boolean=false,val error: String="",val page: Int=1,val more: Boolean=true,val committed: SearchQuery?=null,val credentialGeneration: Long?=null)
+data class SearchState(val platform: Platform=Platform.DOUYU,val keyword: String="",val accounts: Boolean=false,val rooms: List<Room> = emptyList(),val loading: Boolean=false,val error: String="",val page: Int=1,val more: Boolean=true,val committed: SearchQuery?=null,val credentialGeneration: Long?=null,val douyinOffset: Int=0,val douyinVerification: Boolean=false)
 data class PlayerState(val room: Room?=null,val playback: Playback?=null,val loading: Boolean=false,val error: String="",val danmakuStatus: String="",val messages: List<Danmaku> = emptyList(),val revision: Int=0,val needsLogin: Boolean=false)
 
 class LiveViewModel(application: Application) : AndroidViewModel(application) {
@@ -200,7 +200,7 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
         val query=if(append) state.committed ?: return else SearchQuery(state.platform,state.keyword.trim(),state.accounts)
         if(query.keyword.isBlank()) {
             searchJob?.cancel();searchGeneration++
-            search.update { it.copy(rooms=emptyList(),committed=null,loading=false,error="",page=1,more=false) };return
+            search.update { it.copy(rooms=emptyList(),committed=null,loading=false,error="",page=1,more=false,douyinVerification=false) };return
         }
         val douyin=query.platform==Platform.DOUYIN
         val credentialGeneration=if(douyin) app.credentials.douyinSessionGeneration() else null
@@ -209,20 +209,22 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
         val appendResults=append && sameQuery
         val keepResults=appendResults || (douyin && sameQuery)
         searchJob?.cancel(); val generation=++searchGeneration; val page=if(appendResults) state.page+1 else 1
-        search.update { it.copy(loading=true,error="",committed=query,credentialGeneration=credentialGeneration,
+        search.update { it.copy(loading=true,error="",douyinVerification=false,committed=query,credentialGeneration=credentialGeneration,
             page=if(keepResults) it.page else 1,rooms=if(keepResults) it.rooms else emptyList(),more=if(douyin) keepResults && it.more else it.more) }
         searchJob=viewModelScope.launch {
             try {
                 val adapter=app.platforms.getValue(query.platform)
-                val rooms=if(query.platform==Platform.DOUYIN) (adapter as DouyinPlatform).searchMode(query.keyword,page,query.accounts) else adapter.search(query.keyword,page)
+                val result=if(douyin) (adapter as DouyinPlatform).searchResults(query.keyword,if(appendResults) state.douyinOffset else 0,query.accounts) else null
+                val rooms=result?.rooms ?: adapter.search(query.keyword,page)
                 if(douyin && app.credentials.douyinSessionGeneration()!=credentialGeneration) throw PlatformException("抖音会话已改变，请重新搜索")
-                if(generation==searchGeneration) search.update { it.copy(loading=false,rooms=((if(appendResults) it.rooms else emptyList())+rooms).distinctBy { room->room.key+room.userId },page=page,more=rooms.isNotEmpty()) }
+                if(generation==searchGeneration) search.update { it.copy(loading=false,rooms=((if(appendResults) it.rooms else emptyList())+rooms).distinctBy { room->room.key+room.userId },page=page,more=result?.hasMore ?: rooms.isNotEmpty(),douyinOffset=result?.nextOffset ?: 0) }
             } catch(error: CancellationException) { throw error }
             catch(error: Exception) {
                 if(generation==searchGeneration) {
                     val changed=douyin && app.credentials.douyinSessionGeneration()!=credentialGeneration
                     search.update { it.copy(loading=false,error=if(changed) "抖音会话已改变，请重新搜索" else errorText(error),
-                        rooms=if(changed) emptyList() else it.rooms,more=!changed && it.more) }
+                        rooms=if(changed) emptyList() else it.rooms,more=!changed && it.more,
+                        douyinVerification=!changed && error is DouyinSearchVerificationRequired) }
                 }
             }
         }
@@ -276,7 +278,11 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
         danmakuJob=viewModelScope.launch(Dispatchers.IO) {
             previous?.join()
             ensureActive()
-            coroutineScope {
+            val received=java.util.concurrent.atomic.AtomicLong()
+            var dispatched=0L
+            var lastReport=0L
+            LiveDiagnostics.record("Danmaku","platform=${room.platform.name} generation=$connectionGeneration playback=$generation event=start")
+            try { coroutineScope {
                 val pending=kotlinx.coroutines.channels.Channel<Danmaku>(512,kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
                 fun current()=generation==playerGeneration && connectionGeneration==danmakuGeneration && foreground
                 val flush=launch(Dispatchers.Main.immediate) {
@@ -288,20 +294,41 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
                             batch.add(message)
                         }
                         if(batch.isNotEmpty() && current()) {
+                            dispatched+=batch.size
                             screenMessages.tryEmit(batch)
                             player.update { if(current()) it.copy(messages=(it.messages+batch).takeLast(200)) else it }
+                        }
+                        val now=android.os.SystemClock.elapsedRealtime()
+                        if(now-lastReport>=10_000) {
+                            lastReport=now
+                            LiveDiagnostics.record("Danmaku","generation=$connectionGeneration received=${received.get()} dispatched=$dispatched subscribers=${screenMessages.subscriptionCount.value}")
                         }
                     }
                 }
                 try {
-                    app.danmaku.listen(room,{ message -> if(current()) pending.trySend(message) },{ status -> player.update {
+                    app.danmaku.listen(room,{ message -> if(current()) { received.incrementAndGet();pending.trySend(message) } },{ status ->
+                        LiveDiagnostics.record("Danmaku","generation=$connectionGeneration status=$status")
+                        player.update {
                         if(current()) it.copy(danmakuStatus=status) else it
-                    } })
+                    } },{ event -> LiveDiagnostics.record("Danmaku","generation=$connectionGeneration $event") })
                 } finally { pending.close();flush.cancelAndJoin() }
-            }
+            } } catch(error: CancellationException) { throw error }
+            catch(error: Exception) {
+                android.util.Log.w("Danmaku","${room.platform.name} stage=dispatch type=${error.javaClass.simpleName}")
+                player.update { if(generation==playerGeneration && connectionGeneration==danmakuGeneration && foreground)
+                    it.copy(danmakuStatus="弹幕接收已停止，可手动重连或刷新重试") else it }
+            } finally { LiveDiagnostics.record("Danmaku","generation=$connectionGeneration event=end active=$isActive received=${received.get()} dispatched=$dispatched") }
         }
     }
-    fun foreground(active: Boolean) { foreground=active;if(active) startDanmaku() else stopDanmaku() }
+    fun foreground(active: Boolean) {
+        LiveDiagnostics.record("Danmaku","generation=$danmakuGeneration event=foreground active=$active")
+        foreground=active
+        if(active) startDanmaku() else {
+            stopDanmaku()
+            player.update { if(it.playback!=null) it.copy(danmakuStatus="弹幕已暂停") else it }
+        }
+    }
+    fun overlayDiagnostic(event: String) { LiveDiagnostics.record("Danmaku","generation=$danmakuGeneration $event") }
     fun toggleFollow(room: Room) = operation { if(library.value.follows.any { it.room.key==room.key }) storage.unfollow(room) else storage.follow(room) }
     fun refreshFollows() {
         if(refreshJob?.isActive==true || library.value.follows.isEmpty()) return

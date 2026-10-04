@@ -30,39 +30,48 @@ class DanmakuClient(
     private suspend fun <T> stage(name: String,block: suspend ()->T): T = try { block() }
         catch(error: CancellationException) { throw error }
         catch(error: Exception) { throw ConnectionFailure(name,(error as? PlatformException)?.httpStatus,error) }
+    private fun retryable(error: Throwable): Boolean = when(error) {
+        is PlatformException -> error.httpStatus==408 || error.httpStatus==429 || (error.httpStatus ?: 0)>=500
+        is ConnectionFailure -> error.httpCode !in listOf(401,403) && error.cause?.let(::retryable)==true
+        is DouyinDanmaku.Failure -> error.retryable && (error.phase=="握手超时" || error.cause?.let(::retryable)==true)
+        is java.io.IOException, is com.neovisionaries.ws.client.WebSocketException -> true
+        else -> false
+    }
     /** Caller owns the job; cancellation closes the socket and heartbeat before returning. */
-    suspend fun listen(room: Room, message: (Danmaku) -> Unit, status: (String) -> Unit) {
-        if (room.platform == Platform.DOUYIN) {
-            try {
-                DouyinDanmaku.listen({ prepareDouyin(room) }, { author,text -> message(Danmaku(author,text)) }, status,
-                    { android.util.Log.i("Danmaku", "DOUYIN $it") })
-            } catch (error: CancellationException) { throw error }
-            catch (error: Exception) {
-                android.util.Log.w("Danmaku", "DOUYIN phase=prepare type=${error.javaClass.simpleName}")
-                status((error.message ?: "弹幕会话准备失败")+"；可点击重连弹幕")
-            }
-            return
-        }
-        var lastFailure="弹幕连接已关闭"
-        for (attempt in 0..2) {
+    suspend fun listen(room: Room, message: (Danmaku) -> Unit, status: (String) -> Unit,diagnostic: (String)->Unit) {
+        var retryDelay=2000L
+        var reconnecting=false
+        var preferredHost: String?=null
+        while(true) {
             currentCoroutineContext().ensureActive()
-            try {
-                status(if(attempt==0) "正在连接弹幕" else "弹幕重连中（$attempt/2）")
-                session(room,connection(room),message,status)
+            val connectedAt=java.util.concurrent.atomic.AtomicLong()
+            val failure=try {
+                status(if(reconnecting) "正在重连弹幕" else "正在连接弹幕")
+                if(room.platform==Platform.DOUYIN) {
+                    DouyinDanmaku.listen({ prepareDouyin(room) }, { author,text -> message(Danmaku(author,text)) }, status,
+                        { android.util.Log.i("Danmaku", "DOUYIN $it") },preferredHost,
+                        { host -> preferredHost=host;connectedAt.set(System.nanoTime()) })
+                } else session(room,connection(room),message,status,diagnostic) { connectedAt.set(System.nanoTime()) }
+                java.io.IOException("弹幕连接已关闭")
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
-                lastFailure=when(error) {
-                    is ConnectionFailure -> error.message.orEmpty()
-                    is PlatformException -> error.message.orEmpty()
-                    else -> "弹幕连接失败（${error.javaClass.simpleName}）"
-                }
-                android.util.Log.w("Danmaku", "${room.platform.name} attempt=$attempt stage=${(error as? ConnectionFailure)?.stage ?: "connection"} type=${error.cause?.javaClass?.simpleName ?: error.javaClass.simpleName} http=${(error as? ConnectionFailure)?.httpCode ?: 0}")
-                status(lastFailure)
-                if(attempt==2 || (room.platform!=Platform.DOUYIN && error is PlatformException)) break
+                error
             }
-            delay((attempt+1)*1500L)
+            val lastFailure=when(failure) {
+                is ConnectionFailure, is PlatformException, is DouyinDanmaku.Failure -> failure.message.orEmpty()
+                else -> "弹幕连接失败（${failure.javaClass.simpleName}）"
+            }
+            android.util.Log.w("Danmaku", "${room.platform.name} stage=${(failure as? ConnectionFailure)?.stage ?: "connection"} type=${failure.cause?.javaClass?.simpleName ?: failure.javaClass.simpleName} retryable=${retryable(failure)}")
+            if(!retryable(failure)) {
+                status(lastFailure+"；可手动重连或刷新重试")
+                return
+            }
+            if(connectedAt.get()!=0L && System.nanoTime()-connectedAt.get()>=60_000_000_000L) retryDelay=2000L
+            status("$lastFailure；${retryDelay/1000} 秒后自动重连")
+            delay(retryDelay)
+            retryDelay=(retryDelay*2).coerceAtMost(30_000L)
+            reconnecting=true
         }
-        status(lastFailure+if(room.platform==Platform.DOUYIN) "；可点击重连弹幕" else "；可刷新重试")
     }
     private suspend fun connection(room: Room): Connection = when(room.platform) {
         Platform.DOUYU -> Connection("wss://danmuproxy.douyu.com:8506",platformHeaders(room.platform),listOf(
@@ -105,22 +114,46 @@ class DanmakuClient(
         return stage("签名") { DouyinDanmaku.prepare(room.realId,prepared.second.id,prepared.first) { signer.douyin(it) } }
     }
 
-    private suspend fun session(room: Room, config: Connection, message: (Danmaku)->Unit, status: (String)->Unit) = coroutineScope {
+    private suspend fun session(room: Room, config: Connection, message: (Danmaku)->Unit, status: (String)->Unit,diagnostic: (String)->Unit, connected: ()->Unit) = coroutineScope {
         val disconnected=CompletableDeferred<Unit>()
+        val frames=java.util.concurrent.atomic.AtomicLong()
+        val pushFrames=java.util.concurrent.atomic.AtomicLong()
+        val batchFrames=java.util.concurrent.atomic.AtomicLong()
+        val heartbeats=java.util.concurrent.atomic.AtomicLong()
+        val reporter=launch {
+            while(isActive) {
+                delay(10_000)
+                diagnostic("platform=${room.platform.name} frames=${frames.get()} push_frames=${pushFrames.get()} batch_frames=${batchFrames.get()} heartbeats=${heartbeats.get()}")
+            }
+        }
         var heartbeat: Job?=null
         var pending=byteArrayOf()
         val request=Request.Builder().url(config.url).apply { config.headers.forEach { (name,value)-> if(value.isNotBlank()) header(name,value) } }.build()
         val opened=java.util.concurrent.atomic.AtomicBoolean(false)
-        val websocket=net.client.newBuilder().callTimeout(0,TimeUnit.MILLISECONDS).pingInterval(20,TimeUnit.SECONDS).build().newWebSocket(request,object: WebSocketListener() {
+        var receivedChat=false
+        fun chat(value: Danmaku) {
+            message(value)
+            if(!receivedChat) { receivedChat=true;status("弹幕已连接，已收到弹幕") }
+        }
+        // Douyu replies to Ping with an invalid control frame; retain its mrkl heartbeat.
+        val websocketClient=net.client.newBuilder().callTimeout(0,TimeUnit.MILLISECONDS).pingInterval(if(room.platform==Platform.DOUYU) 0 else 20,TimeUnit.SECONDS)
+        // Huya stops pushing after its first compressed batch; request the uncompressed protocol.
+        if(room.platform==Platform.HUYA) websocketClient.addInterceptor { chain ->
+            chain.proceed(chain.request().newBuilder().removeHeader("Sec-WebSocket-Extensions").build())
+        }
+        val websocket=websocketClient.build().newWebSocket(request,object: WebSocketListener() {
             override fun onOpen(socket: WebSocket, response: Response) {
                 if(!isActive || disconnected.isCompleted) { socket.cancel();return }
                 opened.set(true)
-                config.registration.forEach { if(!socket.send(it.toByteString())) disconnected.completeExceptionally(ConnectionFailure("注册")) }
-                status("弹幕已连接")
-                if(config.heartbeat!=null) heartbeat=launch { while(isActive) { delay(config.interval); config.heartbeat?.let { if(!socket.send(it.toByteString())) disconnected.completeExceptionally(java.io.IOException("心跳发送失败")) } } }
+                config.registration.forEach { if(!socket.send(it.toByteString())) disconnected.completeExceptionally(ConnectionFailure("注册",cause=java.io.IOException("注册发送失败"))) }
+                if(disconnected.isCompleted) return
+                connected()
+                status("弹幕握手成功，等待消息")
+                if(config.heartbeat!=null) heartbeat=launch { while(isActive) { delay(config.interval); config.heartbeat?.let { if(!socket.send(it.toByteString())) disconnected.completeExceptionally(java.io.IOException("心跳发送失败")) else heartbeats.incrementAndGet() } } }
             }
             override fun onMessage(socket: WebSocket, bytes: ByteString) {
                 if(!isActive || disconnected.isCompleted) return
+                frames.incrementAndGet()
                 try {
                     if(bytes.size>4*1024*1024) throw PlatformException("弹幕数据过大")
                     when(room.platform) {
@@ -133,28 +166,32 @@ class DanmakuClient(
                                 if(pending.size<length+4) break
                                 val body=pending.copyOfRange(12,length+3).toString(Charsets.UTF_8)
                                 val fields=body.split('/').filter { it.contains("@=") }.associate { it.substringBefore("@=") to it.substringAfter("@=").replace("@S","/").replace("@A","@") }
-                                if(fields["type"]=="chatmsg") message(Danmaku(fields["nn"].orEmpty(),fields["txt"].orEmpty()))
+                                if(fields["type"]=="chatmsg") chat(Danmaku(fields["nn"].orEmpty(),fields["txt"].orEmpty()))
                                 pending=pending.copyOfRange(length+4,pending.size)
                             }
                         }
                         Platform.HUYA -> {
                             val outer=TarsReader(bytes.toByteArray()).fields()
+                            if(outer.number(0)==7L) pushFrames.incrementAndGet()
+                            if(outer.number(0)==22L) batchFrames.incrementAndGet()
                             if(outer.number(0)==7L) {
                                 val inner=TarsReader(outer.blob(1)).fields()
-                                if(inner.number(1)==1400L) { val payload=TarsReader(inner.blob(2)).fields(); val text=payload.text(3); if(text.isNotBlank()) message(Danmaku(payload.struct(0).text(2),text)) }
+                                if(inner.number(1)==1400L) { val payload=TarsReader(inner.blob(2)).fields(); val text=payload.text(3); if(text.isNotBlank()) chat(Danmaku(payload.struct(0).text(2),text)) }
                             }
                         }
-                        Platform.BILIBILI -> decodeBili(bytes.toByteArray(),message,status)
+                        Platform.BILIBILI -> decodeBili(bytes.toByteArray(),::chat,status)
                         Platform.DOUYIN -> Unit
                     }
                 } catch(error: Exception) { disconnected.completeExceptionally(error) }
             }
             override fun onFailure(socket: WebSocket, error: Throwable, response: Response?) {
+                val protocol=if(error is java.net.ProtocolException && error.message=="Control frames must be final.") "control_frame_not_final" else "other"
+                LiveDiagnostics.record("Danmaku","platform=${room.platform.name} event=socket_failure opened=${opened.get()} http=${response?.code} type=${error.javaClass.simpleName} protocol=$protocol pong_timeout=${error.message?.contains("pong",true)==true}")
                 disconnected.completeExceptionally(ConnectionFailure(if(opened.get()) "连接/心跳" else "握手",response?.code,error)) }
-            override fun onClosing(socket: WebSocket, code: Int, reason: String) { socket.close(code,null); disconnected.completeExceptionally(ConnectionFailure("连接关闭（$code）")) }
-            override fun onClosed(socket: WebSocket, code: Int, reason: String) { disconnected.completeExceptionally(ConnectionFailure("连接关闭（$code）")) }
+            override fun onClosing(socket: WebSocket, code: Int, reason: String) { socket.close(code,null); disconnected.completeExceptionally(ConnectionFailure("连接关闭（$code）",cause=java.io.IOException())) }
+            override fun onClosed(socket: WebSocket, code: Int, reason: String) { disconnected.completeExceptionally(ConnectionFailure("连接关闭（$code）",cause=java.io.IOException())) }
         })
-        try { disconnected.await() } finally { heartbeat?.cancel(); websocket.cancel() }
+        try { disconnected.await() } finally { reporter.cancel();heartbeat?.cancel(); websocket.cancel() }
     }
     private fun decodeBili(data: ByteArray, message: (Danmaku)->Unit, status: (String)->Unit, depth: Int=0) {
         require(depth<5)
@@ -166,7 +203,7 @@ class DanmakuClient(
             when {
                 version==2 -> decodeBili(inflate(InflaterInputStream(ByteArrayInputStream(body))),message,status,depth+1)
                 version==3 -> decodeBili(inflate(BrotliInputStream(ByteArrayInputStream(body))),message,status,depth+1)
-                operation==8 -> { if(JSONObject(body.toString(Charsets.UTF_8)).optInt("code",-1)!=0) throw PlatformException("B站弹幕认证失败，请重新登录"); status("弹幕已连接") }
+                operation==8 -> { if(JSONObject(body.toString(Charsets.UTF_8)).optInt("code",-1)!=0) throw PlatformException("B站弹幕认证失败，请重新登录"); status("弹幕认证成功，等待消息") }
                 operation==5 -> {
                     val json=JSONObject(body.toString(Charsets.UTF_8))
                     if(json.str("cmd").substringBefore(':')=="DANMU_MSG") { val info=json.arr("info"); message(Danmaku(info.optJSONArray(2)?.optString(1).orEmpty(),info.optString(1))) }

@@ -5,6 +5,7 @@ import kotlinx.coroutines.*
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.GZIPInputStream
 import org.json.JSONObject
 
@@ -18,7 +19,10 @@ object DouyinDanmaku {
         Exception("弹幕${phase}失败（$host${http?.let { "，HTTP $it" }.orEmpty()}）" +
             when (responseKind) { "verification_html" -> "：平台要求安全验证"; "html" -> "：返回普通页面"
                 "json" -> "：返回JSON错误${businessCode?.let { "（$it）" }.orEmpty()}"; "empty" -> "：响应为空，原因未识别"
-                else -> if (http != null) "：拒绝原因未识别" else "" }, cause)
+                else -> if (http != null) "：拒绝原因未识别" else "" }, cause) {
+        val retryable: Boolean get() = http !in listOf(401,403) && responseKind!="verification_html" &&
+            (businessCode==null || businessCode==0L)
+    }
 
     private fun rejection(error: OpeningHandshakeException?): Pair<String, Long?> {
         if (error == null) return "unknown" to null
@@ -69,30 +73,26 @@ object DouyinDanmaku {
             "Accept-Language" to "zh-CN,zh;q=0.9,en;q=0.8", "Cache-Control" to "no-cache", "Pragma" to "no-cache"))
     }
 
-    /** Five handshakes per round; only an established connection permits another round. */
+    /** Try each host once; the caller owns backoff and cancellation across rounds. */
     suspend fun listen(prepare: suspend () -> Prepared, message: (String, String) -> Unit,
-        status: (String) -> Unit, diagnostic: (String) -> Unit) {
-        var preferred: String? = null
+        status: (String) -> Unit, diagnostic: (String) -> Unit, preferred: String?, connected: (String)->Unit) {
         var last: Exception? = null
-        for (round in 0..2) {
-            val config = prepare()
-            var established = false
-            for (host in listOfNotNull(preferred) + hosts.filter { it != preferred }) {
-                currentCoroutineContext().ensureActive()
-                status("正在连接弹幕（$host）")
-                try {
-                    session(config, host, { established = true; preferred = host }, message, status, diagnostic)
-                } catch (error: CancellationException) { throw error }
-                catch (error: Exception) {
-                    last = if (error is Failure) error else Failure("连接", host, cause = error)
-                    status(last.message.orEmpty())
-                    if (established) break
-                }
+        val config = prepare()
+        var established = false
+        for (host in listOfNotNull(preferred) + hosts.filter { it != preferred }) {
+            currentCoroutineContext().ensureActive()
+            status("正在连接弹幕（$host）")
+            try {
+                session(config, host, { established = true; connected(host) }, message, status, diagnostic)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                val failure = if (error is Failure) error else Failure("连接", host, cause = error)
+                if(!failure.retryable || established) throw failure
+                last = failure
+                status(failure.message.orEmpty())
             }
-            if (!established || round == 2) break
-            delay(1500L * (round + 1))
         }
-        status((last?.message ?: "弹幕连接已关闭") + "；可点击重连弹幕")
+        throw last ?: java.io.IOException("弹幕连接已关闭")
     }
 
     suspend fun session(config: Prepared, host: String, connected: () -> Unit,
@@ -102,6 +102,7 @@ object DouyinDanmaku {
         val ended = CompletableDeferred<Unit>()
         val active = AtomicBoolean(true)
         val failed = AtomicBoolean(false)
+        val lastInbound = AtomicLong()
         var receivedChat = false
         val socket = WebSocketFactory().setConnectionTimeout(12_000)
             .createSocket("wss://$host/webcast/im/push/v2/?${config.query}")
@@ -127,6 +128,7 @@ object DouyinDanmaku {
             override fun onConnected(websocket: WebSocket, headers: Map<String, List<String>>) {
                 if (!active.get()) { websocket.disconnect(); return }
                 diagnostic("phase=handshake host=$host http=101")
+                lastInbound.set(System.nanoTime())
                 opened.complete(Unit)
                 status("弹幕握手成功，等待消息")
             }
@@ -138,6 +140,9 @@ object DouyinDanmaku {
                 fail("连接关闭", java.io.IOException())
             }
             // nv-websocket-client automatically replies to server Ping with the same payload.
+            override fun onFrame(websocket: WebSocket, frame: WebSocketFrame) {
+                lastInbound.set(System.nanoTime())
+            }
             override fun onFrameSent(websocket: WebSocket, frame: WebSocketFrame) {
                 if (!active.get()) return
                 if (frame.isPingFrame) diagnostic("phase=heartbeat_sent host=$host")
@@ -204,6 +209,11 @@ object DouyinDanmaku {
             connected()
             val heartbeat = launch {
                 while (isActive && !ended.isCompleted) {
+                    // Pong and other frames keep quiet rooms alive; chat frequency is irrelevant.
+                    if(System.nanoTime()-lastInbound.get()>30_000_000_000L) {
+                        fail("心跳响应超时",java.io.IOException())
+                        break
+                    }
                     socket.sendPing(Proto.encode(emptyMap(), mapOf(7 to "hb".toByteArray())))
                     delay(5000)
                 }

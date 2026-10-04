@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
 class LiveApplication : Application() {
+    override fun onCreate() { super.onCreate();LiveDiagnostics.initialize(this) }
     val applicationScope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
     val playback by lazy { PlaybackConnection(this) }
     val network by lazy { Network() }

@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
     private var loginDialog: Dialog?=null
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(); super.onCreate(savedInstanceState)
-        setContent { LiveApp(model,::login,::fullscreen,::verifyBili) }
+        setContent { LiveApp(model,{login(it)},::fullscreen,::verifyBili,::verifyDouyinSearch) }
     }
     fun fullscreen(enabled: Boolean,landscape: Boolean) {
         requestedOrientation=if(enabled && landscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -44,14 +44,25 @@ class MainActivity : ComponentActivity() {
             model.completeVerification(challenge,token)
         }
     }
-    private fun login(platform: Platform) {
+    private fun verifyDouyinSearch() {
+        val state=model.search.value
+        val query=state.committed ?: return
+        if(!state.douyinVerification || query.platform!=Platform.DOUYIN) return
+        login(Platform.DOUYIN,query)
+    }
+    private fun login(platform: Platform,searchQuery: SearchQuery?=null) {
         if(loginDialog!=null || platform !in listOf(Platform.DOUYIN,Platform.BILIBILI)) return
         val domain=if(platform==Platform.DOUYIN) "douyin.com" else "bilibili.com"
-        val target=if(platform==Platform.DOUYIN) "https://www.douyin.com/" else "https://passport.bilibili.com/login"
+        val target=if(searchQuery!=null) "https://www.douyin.com/search/${encoded(searchQuery.keyword)}?type=${if(searchQuery.accounts) "user" else "live"}"
+            else if(platform==Platform.DOUYIN) "https://www.douyin.com/" else "https://passport.bilibili.com/login"
         val cookies=CookieManager.getInstance()
         val webView=WebView(this).apply {
             settings.javaScriptEnabled=true; settings.domStorageEnabled=true
             settings.userAgentString=if(platform==Platform.DOUYIN) DOUYIN_UA else DESKTOP_UA
+            if(searchQuery!=null) {
+                settings.useWideViewPort=true;settings.loadWithOverviewMode=true
+                settings.builtInZoomControls=true;settings.displayZoomControls=false
+            }
             settings.allowFileAccess=false; settings.allowContentAccess=false
             settings.mixedContentMode=android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             webViewClient=object: WebViewClient() {
@@ -66,7 +77,7 @@ class MainActivity : ComponentActivity() {
         val layout=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; fitsSystemWindows=true }
         var confirmed=false
         var loginGeneration: Long?=null
-        val done=Button(this).apply { text="完成登录，返回简直播";isEnabled=platform!=Platform.DOUYIN }
+        val done=Button(this).apply { text=if(searchQuery!=null) "完成登录或验证，重试搜索" else "完成登录，返回简直播";isEnabled=platform!=Platform.DOUYIN }
         done.setOnClickListener {
             if(platform!=Platform.DOUYIN) { confirmed=true;dialog.dismiss();return@setOnClickListener }
             val generation=loginGeneration ?: return@setOnClickListener
@@ -85,7 +96,10 @@ class MainActivity : ComponentActivity() {
                     if(!isDestroyed) {
                         model.notice.value="抖音登录信息已保存"
                         if(loginDialog===dialog) dialog.dismiss()
-                        if(model.browse.value.platform==Platform.DOUYIN) model.loadRooms()
+                        if(searchQuery!=null) {
+                            val state=model.search.value
+                            if(SearchQuery(state.platform,state.keyword.trim(),state.accounts)==searchQuery) model.searchRooms()
+                        } else if(model.browse.value.platform==Platform.DOUYIN) model.loadRooms()
                     }
                 } catch(error: kotlinx.coroutines.CancellationException) { throw error }
                 catch(error: Exception) {

@@ -26,7 +26,7 @@ fun DanmakuOverlay(model: LiveViewModel,revision: Int,settings: DanmakuSettings,
     val context=LocalContext.current
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     val fontSize=with(LocalDensity.current) { settings.fontSize.sp.toPx() }
-    val overlay=remember(context,revision) { DanmakuCanvas(context) }
+    val overlay=remember(context,revision) { DanmakuCanvas(context,model::overlayDiagnostic) }
     // Composite opaque text and its shadow first, then fade the completed overlay.
     AndroidView(factory={overlay},modifier=modifier.graphicsLayer {
         alpha=settings.opacity.coerceIn(0f,1f)
@@ -46,7 +46,12 @@ fun DanmakuOverlay(model: LiveViewModel,revision: Int,settings: DanmakuSettings,
     DisposableEffect(overlay) { onDispose { overlay.stop() } }
 }
 
-private class DanmakuCanvas(context: Context) : View(context),Choreographer.FrameCallback {
+private class DanmakuCanvas(context: Context,private val report: (String)->Unit) : View(context),Choreographer.FrameCallback {
+    private var received=0L
+    private var accepted=0L
+    private var drawn=0L
+    private var lastReport=0L
+    private fun diagnostic(event: String) { report("view=${System.identityHashCode(this)} $event") }
     private data class Entry(val id: Long,val text: String,val width: Float,val row: Int,val started: Long,val duration: Long)
     private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color=android.graphics.Color.WHITE
@@ -67,6 +72,7 @@ private class DanmakuCanvas(context: Context) : View(context),Choreographer.Fram
     private val choreographer=Choreographer.getInstance()
 
     fun configure(value: DanmakuSettings,fontSize: Float,words: List<String>) {
+        if(settings!=value || paint.textSize!=fontSize) diagnostic("event=settings font=$fontSize area=${value.area} duration=${value.duration} opacity=${value.opacity} density=${value.density} mode=${value.mode} enabled=${value.enabled}")
         val layoutChanged=paint.textSize!=fontSize || settings.copy(opacity=value.opacity)!=value
         settings=value
         paint.textSize=fontSize
@@ -88,8 +94,8 @@ private class DanmakuCanvas(context: Context) : View(context),Choreographer.Fram
         availableAt=LongArray((height*settings.area/rowHeight).toInt().coerceIn(1,128))
     }
 
-    fun start() { clear();lifecycleActive=true;running=isAttachedToWindow }
-    fun stop() { lifecycleActive=false;running=false;clear() }
+    fun start() { clear();lifecycleActive=true;running=isAttachedToWindow;diagnostic("event=start attached=$isAttachedToWindow") }
+    fun stop() { lifecycleActive=false;running=false;clear();diagnostic("event=stop received=$received accepted=$accepted drawn=$drawn") }
 
     private fun clear() {
         choreographer.removeFrameCallback(this);scheduled=false
@@ -98,6 +104,12 @@ private class DanmakuCanvas(context: Context) : View(context),Choreographer.Fram
     }
 
     fun accept(messages: List<Danmaku>) {
+        received+=messages.size
+        val reportTime=android.os.SystemClock.elapsedRealtime()
+        if(reportTime-lastReport>=10_000) {
+            lastReport=reportTime
+            diagnostic("received=$received accepted=$accepted drawn=$drawn running=$running attached=$isAttachedToWindow width=$width height=$height scheduled=$scheduled")
+        }
         if(!running || width<=0 || height<=0) return
         val interval=when(settings.density) { "dense" -> 600L;"sparse" -> 2200L;else -> 1200L }
         val now=System.nanoTime()
@@ -115,6 +127,7 @@ private class DanmakuCanvas(context: Context) : View(context),Choreographer.Fram
             availableAt[row]=now+if(settings.mode=="scroll") maxOf(interval*1_000_000,headClear) else duration
             if(entries.size==512) entries.removeAt(0)
             entries.add(Entry(message.id,text,textWidth,row,now,duration))
+            accepted++
         }
         requestFrame()
     }
@@ -147,9 +160,10 @@ private class DanmakuCanvas(context: Context) : View(context),Choreographer.Fram
             val horizontal=if(settings.mode=="scroll") width-(width+entry.width)*elapsed else (width-entry.width)/2
             val vertical=if(settings.mode=="bottom") height-entry.row*rowHeight-descent else (entry.row+1)*rowHeight
             canvas.drawText(entry.text,horizontal,vertical,paint)
+            drawn++
         }
     }
 
-    override fun onAttachedToWindow() { super.onAttachedToWindow();running=lifecycleActive }
-    override fun onDetachedFromWindow() { running=false;clear();super.onDetachedFromWindow() }
+    override fun onAttachedToWindow() { super.onAttachedToWindow();running=lifecycleActive;diagnostic("event=attach active=$lifecycleActive") }
+    override fun onDetachedFromWindow() { running=false;clear();diagnostic("event=detach");super.onDetachedFromWindow() }
 }

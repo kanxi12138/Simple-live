@@ -42,7 +42,7 @@ private val LightPalette=lightColorScheme(primary=Color(0xff1764d9),onPrimary=Co
 private val DarkPalette=darkColorScheme(primary=Color(0xff91baff),onPrimary=Color(0xff062858),background=Color(0xff101a2a),surface=Color(0xff17263c),onSurface=Color(0xffedf3fc),onBackground=Color(0xffedf3fc),onSurfaceVariant=Color(0xffb1bfd3),surfaceVariant=Color(0xff24354d))
 
 @Composable
-fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolean,Boolean)->Unit,onVerify: (BiliListChallenge)->Unit) {
+fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolean,Boolean)->Unit,onVerify: (BiliListChallenge)->Unit,onSearchVerify: ()->Unit) {
     val preferences by model.preferences.collectAsStateWithLifecycle()
     val player by model.player.collectAsStateWithLifecycle()
     val recovery by model.recovery.collectAsStateWithLifecycle()
@@ -76,7 +76,7 @@ fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolea
                 Column(Modifier.fillMaxSize().padding(padding)) {
                     when(tab) {
                         0 -> HomeScreen(model,onLogin,onVerify)
-                        1 -> SearchScreen(model,onLogin)
+                        1 -> SearchScreen(model,onLogin,onSearchVerify)
                         2 -> FollowsScreen(model)
                         else -> SettingsScreen(model,onLogin)
                     }
@@ -143,7 +143,7 @@ private fun HomeScreen(model: LiveViewModel,onLogin: (Platform)->Unit,onVerify: 
     }
 }
 @Composable
-private fun SearchScreen(model: LiveViewModel,onLogin: (Platform)->Unit) {
+private fun SearchScreen(model: LiveViewModel,onLogin: (Platform)->Unit,onSearchVerify: ()->Unit) {
     val state by model.search.collectAsStateWithLifecycle()
     SectionTitle("搜索","搜索主播，或直接输入房间号")
     PlatformTabs(state.platform,model::searchPlatform)
@@ -157,6 +157,11 @@ private fun SearchScreen(model: LiveViewModel,onLogin: (Platform)->Unit) {
         }
         Spacer(Modifier.weight(1f))
         if(state.platform in listOf(Platform.DOUYIN,Platform.BILIBILI)) TextButton(onClick={onLogin(state.platform)}) { Text("登录") }
+    }
+    if(state.douyinVerification) TextButton(onClick=onSearchVerify,modifier=Modifier.padding(horizontal=16.dp)) {
+        Icon(Icons.Outlined.VerifiedUser,contentDescription=null)
+        Spacer(Modifier.width(8.dp))
+        Text("完成官方验证")
     }
     val emptyText=when {
         state.committed==null -> "输入关键词开始搜索"
@@ -300,7 +305,10 @@ private fun ColumnScope.FollowsScreen(model: LiveViewModel) {
 @Composable
 private fun FollowRow(follow: Follow,onOpen: ()->Unit,onManage: ()->Unit) {
     ListItem(headlineContent={Text((if(follow.pinned) "置顶 · " else "")+follow.displayName.ifBlank { follow.room.name },maxLines=1,overflow=TextOverflow.Ellipsis)},
-        supportingContent={Text("${follow.room.platform.label} · ${when(follow.room.status) { LiveStatus.LIVE -> "直播中";LiveStatus.OFFLINE -> "未开播";LiveStatus.REPLAY -> "轮播中";else -> "状态待刷新" }}",color=if(follow.room.status==LiveStatus.LIVE) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)},
+        supportingContent={Column {
+            if(follow.room.title.isNotBlank()) Text(follow.room.title,maxLines=2,overflow=TextOverflow.Ellipsis)
+            Text("${follow.room.platform.label} · ${when(follow.room.status) { LiveStatus.LIVE -> "直播中";LiveStatus.OFFLINE -> "未开播";LiveStatus.REPLAY -> "轮播中";else -> "状态待刷新" }}",color=if(follow.room.status==LiveStatus.LIVE) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        }},
         leadingContent={AsyncImage(follow.room.avatar,null,Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant),contentScale=ContentScale.Crop)},
         trailingContent={IconButton(onClick=onManage){Icon(Icons.Outlined.MoreVert,"管理关注")}},modifier=Modifier.combinedClickable(onClick=onOpen,onLongClick=onManage))
 }
