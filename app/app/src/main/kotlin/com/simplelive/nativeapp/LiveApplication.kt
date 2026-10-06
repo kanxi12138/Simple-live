@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
 class LiveApplication : Application() {
+    var followsAutoRefreshConsumed=false
     override fun onCreate() { super.onCreate();LiveDiagnostics.initialize(this) }
     val applicationScope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
     val playback by lazy { PlaybackConnection(this) }

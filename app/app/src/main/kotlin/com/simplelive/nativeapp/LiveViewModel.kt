@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 
 data class BrowseState(
@@ -23,6 +25,7 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     val library=storage.library.stateIn(viewModelScope,SharingStarted.Eagerly,Library())
     val recovery=storage.recovery
     val notice=MutableStateFlow("")
+    val followsRefreshNotice=MutableStateFlow("")
     val browse=MutableStateFlow(BrowseState())
     val search=MutableStateFlow(SearchState())
     val player=app.playback.state
@@ -330,21 +333,36 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun overlayDiagnostic(event: String) { LiveDiagnostics.record("Danmaku","generation=$danmakuGeneration $event") }
     fun toggleFollow(room: Room) = operation { if(library.value.follows.any { it.room.key==room.key }) storage.unfollow(room) else storage.follow(room) }
+    fun onFollowsOpened() {
+        if(app.followsAutoRefreshConsumed) return
+        app.followsAutoRefreshConsumed=true
+        refreshFollows()
+    }
     fun refreshFollows() {
-        if(refreshJob?.isActive==true || library.value.follows.isEmpty()) return
+        if(refreshJob?.isActive==true) return
         mutableFollowsRefreshing.value=true
         refreshJob=viewModelScope.launch {
             try {
-                var failed=0
-                for(follow in library.value.follows) {
-                    try {
-                        val room=app.platforms.getValue(follow.room.platform).detail(follow.room)
-                        // Re-read after the request so deleting or moving a follow cannot be undone by refresh.
-                        storage.refreshRoom(follow.room.key,room.copy(id=follow.room.id))
-                    } catch(error: CancellationException) { throw error } catch(error: Exception) { failed++ }
+                // Read the database emission instead of the StateFlow's initial empty placeholder.
+                val follows=storage.library.first().follows
+                if(follows.isEmpty()) return@launch
+                val limits=follows.map { it.room.platform }.distinct().associateWith { Semaphore(2) }
+                val failed=coroutineScope {
+                    follows.map { follow -> async {
+                        limits.getValue(follow.room.platform).withPermit {
+                            try {
+                                val room=app.platforms.getValue(follow.room.platform).detail(follow.room)
+                                // Re-read after the request so deleting or moving a follow cannot be undone by refresh.
+                                storage.refreshRoom(follow.room.key,room.copy(id=follow.room.id))
+                                false
+                            } catch(error: CancellationException) { throw error } catch(error: Exception) { true }
+                        }
+                    } }.awaitAll().count { it }
                 }
-                notice.value=if(failed==0) "关注状态已刷新" else "刷新完成，$failed 个房间暂不可用"
-            } finally { mutableFollowsRefreshing.value=false }
+                followsRefreshNotice.value=if(failed==0) "关注状态已刷新" else "刷新完成，$failed 个房间暂不可用"
+            } catch(error: CancellationException) { throw error }
+            catch(error: Exception) { notice.value=errorText(error) }
+            finally { mutableFollowsRefreshing.value=false }
         }
     }
 

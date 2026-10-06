@@ -41,12 +41,19 @@ import kotlinx.coroutines.launch
 private val LightPalette=lightColorScheme(primary=Color(0xff1764d9),onPrimary=Color.White,background=Color(0xfff5f8fc),surface=Color.White,onSurface=Color(0xff17263c),onBackground=Color(0xff17263c),onSurfaceVariant=Color(0xff52647b),surfaceVariant=Color(0xffeaf0f8),outlineVariant=Color(0xffdce4ef))
 private val DarkPalette=darkColorScheme(primary=Color(0xff91baff),onPrimary=Color(0xff062858),background=Color(0xff101a2a),surface=Color(0xff17263c),onSurface=Color(0xffedf3fc),onBackground=Color(0xffedf3fc),onSurfaceVariant=Color(0xffb1bfd3),surfaceVariant=Color(0xff24354d))
 
+private class FollowsRefreshSnackbarVisuals(override val message: String) : SnackbarVisuals {
+    override val actionLabel: String?=null
+    override val withDismissAction=false
+    override val duration=SnackbarDuration.Short
+}
+
 @Composable
 fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolean,Boolean)->Unit,onVerify: (BiliListChallenge)->Unit,onSearchVerify: ()->Unit) {
     val preferences by model.preferences.collectAsStateWithLifecycle()
     val player by model.player.collectAsStateWithLifecycle()
     val recovery by model.recovery.collectAsStateWithLifecycle()
     val notice by model.notice.collectAsStateWithLifecycle()
+    val followsRefreshNotice by model.followsRefreshNotice.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val pages=rememberSaveableStateHolder()
     val systemDark=isSystemInDarkTheme()
@@ -56,13 +63,19 @@ fun LiveApp(model: LiveViewModel,onLogin: (Platform)->Unit,onFullscreen: (Boolea
         bodyLarge=MaterialTheme.typography.bodyLarge.copy(fontSize=16.sp),bodyMedium=MaterialTheme.typography.bodyMedium.copy(fontSize=14.sp))) {
         val snackbar=remember { SnackbarHostState() }
         LaunchedEffect(notice) { if(notice.isNotBlank()) { snackbar.showSnackbar(notice); if(model.notice.value==notice) model.notice.value="" } }
-        Scaffold(snackbarHost={ SnackbarHost(snackbar) },bottomBar={
+        LaunchedEffect(followsRefreshNotice) {
+            if(followsRefreshNotice.isNotBlank()) {
+                snackbar.showSnackbar(FollowsRefreshSnackbarVisuals(followsRefreshNotice))
+                if(model.followsRefreshNotice.value==followsRefreshNotice) model.followsRefreshNotice.value=""
+            }
+        }
+        Scaffold(snackbarHost={ SnackbarHost(snackbar) { data ->
+            Snackbar(data,containerColor=if(data.visuals is FollowsRefreshSnackbarVisuals) SnackbarDefaults.color.copy(alpha=0.5f) else SnackbarDefaults.color)
+        } },bottomBar={
             if(recovery.ready && player.room==null) NavigationBar(containerColor=MaterialTheme.colorScheme.surface) {
                 listOf(Triple("首页",Icons.Outlined.Home,0),Triple("搜索",Icons.Outlined.Search,1),Triple("关注",Icons.Outlined.FavoriteBorder,2),Triple("设置",Icons.Outlined.Settings,3)).forEach { (label,icon,index)->
                     NavigationBarItem(selected=tab==index,onClick={
-                        val enteringFollows=tab!=2 && index==2
                         tab=index
-                        if(enteringFollows) model.refreshFollows()
                     },icon={Icon(icon,label)},label={Text(label)})
                 }
             }
@@ -206,6 +219,7 @@ fun ErrorCard(message: String,onRetry: ()->Unit) {
 }
 @Composable
 private fun ColumnScope.FollowsScreen(model: LiveViewModel) {
+    LaunchedEffect(Unit) { model.onFollowsOpened() }
     val library by model.library.collectAsStateWithLifecycle()
     var selected by remember { mutableStateOf<Follow?>(null) }
     var editFolder by remember { mutableStateOf<Folder?>(null) }
