@@ -38,6 +38,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 // A null landscape means video orientation is not yet known.
 data class PlaybackStatus(val player: Player?=null,val playing: Boolean=false,val landscape: Boolean?=null,val audioOnly: Boolean=false,val error: String="",val audioStatus: String="")
@@ -121,6 +123,7 @@ class LivePlaybackService : MediaSessionService() {
     private var lastAudioBuffers=0
     private var lastAudioPosition=0L
     private var lastAudioProgress=0L
+    private var videoFrameListener: androidx.media3.exoplayer.video.VideoFrameMetadataListener?=null
 
     override fun onCreate() {
         super.onCreate()
@@ -198,12 +201,33 @@ class LivePlaybackService : MediaSessionService() {
             HlsMediaSource.Factory(factory).setPlaylistParserFactory(access).createMediaSource(item)
         } else DefaultMediaSourceFactory(factory).createMediaSource(item)
         player.setMediaSource(source)
+        val firstVideoTimestamp=AtomicLong(C.TIME_UNSET)
+        val lastVideoTimestamp=AtomicLong(C.TIME_UNSET)
+        val videoFrames=AtomicInteger()
+        if(playback.room.platform==Platform.DOUYU) {
+            val listener=androidx.media3.exoplayer.video.VideoFrameMetadataListener { presentationTimeUs,_,_,_ ->
+                firstVideoTimestamp.compareAndSet(C.TIME_UNSET,presentationTimeUs)
+                lastVideoTimestamp.set(presentationTimeUs)
+                videoFrames.incrementAndGet()
+            }
+            videoFrameListener=listener
+            player.setVideoFrameMetadataListener(listener)
+        }
         player.prepare()
         player.play()
         lastAudioProgress=SystemClock.elapsedRealtime()
         audioMonitor=scope.launch {
+            var samples=0
             while(isActive && generation==playbackGeneration) {
                 monitorAudio()
+                if(playback.room.platform==Platform.DOUYU && samples++%10==0) {
+                    val format=player.videoFormat
+                    val counters=player.videoDecoderCounters
+                    counters?.ensureUpdated()
+                    val durationUs=lastVideoTimestamp.get()-firstVideoTimestamp.get()
+                    val measuredFps=if(durationUs>0) (videoFrames.get()-1)*1_000_000.0/durationUs else 0.0
+                    LiveDiagnostics.record("DouyuVideo","generation=$generation state=${player.playbackState} playing=${player.isPlaying} width=${format?.width} height=${format?.height} fps=${format?.frameRate} measuredFps=$measuredFps bitrate=${format?.bitrate} rendered=${counters?.renderedOutputBufferCount} dropped=${counters?.droppedBufferCount} skipped=${counters?.skippedOutputBufferCount} position=${player.currentPosition} buffered=${player.totalBufferedDuration}")
+                }
                 delay(1000)
             }
         }
@@ -238,6 +262,7 @@ class LivePlaybackService : MediaSessionService() {
 
     fun resetPlayback() {
         playbackGeneration++
+        videoFrameListener?.let { player.clearVideoFrameMetadataListener(it) };videoFrameListener=null
         streamAccess?.close();streamAccess=null
         audioMonitor?.cancel();audioMonitor=null
         roomRefresh?.cancel();roomRefresh=null

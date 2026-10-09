@@ -252,9 +252,17 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
                 if(generation!=playerGeneration || player.value.revision!=revision || player.value.room==null) return@launch
                 player.update { it.copy(room=current) }
                 if(current.status!=LiveStatus.LIVE) { player.value=PlayerState(room=current,error=if(current.status==LiveStatus.REPLAY) "主播正在轮播，暂无实时直播" else "主播未开播",revision=revision); return@launch }
-                val result=adapter.playback(current,quality ?: preferences.value["${room.platform.name}_preferred_quality"],line ?: preferences.value["${room.platform.name}_preferred_line"])
+                val requestedQuality=quality ?: preferences.value["${room.platform.name}_preferred_quality"]
+                val result=adapter.playback(current,requestedQuality,line ?: preferences.value["${room.platform.name}_preferred_line"])
                 if(generation!=playerGeneration || player.value.revision!=revision || player.value.room==null) return@launch
                 player.value=PlayerState(room=result.room,playback=result,revision=revision)
+                if(room.platform==Platform.DOUYU && requestedQuality!=null) {
+                    val requested=result.qualities.firstOrNull { it.id==requestedQuality || it.name==requestedQuality }
+                    if(requested!=null && requested.id!=result.quality) {
+                        val actual=result.qualities.firstOrNull { it.id==result.quality }?.name.orEmpty()
+                        notice.value="斗鱼实际提供${actual}，未获得${requested.name}；可在设置中登录斗鱼后重试"
+                    }
+                }
                 app.playback.play(result)
                 storage.preference("${room.platform.name}_preferred_quality",result.quality)
                 storage.preference("${room.platform.name}_preferred_line",result.line)

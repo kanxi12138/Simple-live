@@ -51,26 +51,36 @@ class MainActivity : ComponentActivity() {
         login(Platform.DOUYIN,query)
     }
     private fun login(platform: Platform,searchQuery: SearchQuery?=null) {
-        if(loginDialog!=null || platform !in listOf(Platform.DOUYIN,Platform.BILIBILI)) return
-        val domain=if(platform==Platform.DOUYIN) "douyin.com" else "bilibili.com"
+        if(loginDialog!=null || platform !in listOf(Platform.DOUYIN,Platform.BILIBILI,Platform.DOUYU)) return
+        val domain=when(platform) { Platform.DOUYIN -> "douyin.com"; Platform.DOUYU -> "douyu.com"; else -> "bilibili.com" }
         val target=if(searchQuery!=null) "https://www.douyin.com/search/${encoded(searchQuery.keyword)}?type=${if(searchQuery.accounts) "user" else "live"}"
-            else if(platform==Platform.DOUYIN) "https://www.douyin.com/" else "https://passport.bilibili.com/login"
+            else when(platform) { Platform.DOUYIN -> "https://www.douyin.com/"; Platform.DOUYU -> "https://www.douyu.com/member/login"; else -> "https://passport.bilibili.com/login" }
         val cookies=CookieManager.getInstance()
         val webView=WebView(this).apply {
             settings.javaScriptEnabled=true; settings.domStorageEnabled=true
             settings.userAgentString=if(platform==Platform.DOUYIN) DOUYIN_UA else DESKTOP_UA
-            if(searchQuery!=null) {
+            if(searchQuery!=null || platform==Platform.DOUYU) {
                 settings.useWideViewPort=true;settings.loadWithOverviewMode=true
                 settings.builtInZoomControls=true;settings.displayZoomControls=false
             }
+            if(platform==Platform.DOUYU) setInitialScale(35)
             settings.allowFileAccess=false; settings.allowContentAccess=false
             settings.mixedContentMode=android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             webViewClient=object: WebViewClient() {
+                override fun onPageCommitVisible(view: WebView,url: String) {
+                    if(platform==Platform.DOUYU) view.evaluateJavascript("document.querySelector('meta[name=viewport]')?.setAttribute('content','width=1200,initial-scale=0.35,user-scalable=yes');",null)
+                }
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val uri=request.url; val host=uri.host.orEmpty()
                     return uri.scheme!="https" || !(host==domain || host.endsWith(".$domain"))
                 }
-                override fun onPageFinished(view: WebView,url: String) { cookies.flush() }
+                override fun onPageFinished(view: WebView,url: String) {
+                    cookies.flush()
+                    if(platform==Platform.DOUYU) {
+                        // The official desktop login fixes a phone-width viewport around a wide form.
+                        view.evaluateJavascript("document.querySelector('meta[name=viewport]')?.setAttribute('content','width=1200,initial-scale=0.35,user-scalable=yes');",null)
+                    }
+                }
             }
         }
         val dialog=Dialog(this,android.R.style.Theme_DeviceDefault_Light_NoActionBar)
@@ -118,6 +128,7 @@ class MainActivity : ComponentActivity() {
                 .map { it.trim() }.filter { it.contains('=') }.associate { it.substringBefore('=') to it.substringAfter('=') } else emptyMap()
             val hasAccountSession=when(platform) {
                 Platform.BILIBILI -> !candidate["SESSDATA"].isNullOrBlank()
+                Platform.DOUYU -> !candidate["acf_auth"].isNullOrBlank()
                 Platform.DOUYIN -> listOf("sessionid","sessionid_ss","sid_guard").any { !candidate[it].isNullOrBlank() }
                 else -> false
             }

@@ -4,10 +4,10 @@ import org.json.JSONObject
 import java.util.UUID
 
 // Platform behavior ported from the archived DTV/dart_simple_live adapters; see notices.
-class DouyuPlatform(private val net: Network, private val signer: SignatureEngine) : LivePlatform {
+class DouyuPlatform(private val net: Network, private val credentials: Credentials) : LivePlatform {
     private val headers = platformHeaders(Platform.DOUYU)
-    private suspend fun data(url: String, form: String? = null): JSONObject {
-        val result = net.json(url, headers, form)
+    private suspend fun data(url: String, form: String? = null, requestHeaders: Map<String,String> = headers): JSONObject {
+        val result = net.json(url, requestHeaders, form)
         if (result.optInt("error", result.optInt("code", 0)) != 0) throw PlatformException("斗鱼请求失败：${result.str("msg")}")
         return result.obj("data")
     }
@@ -56,17 +56,34 @@ class DouyuPlatform(private val net: Network, private val signer: SignatureEngin
         val current = room
         if (current.status != LiveStatus.LIVE) throw PlatformException("主播未开播")
         val roomId = current.realId
-        val script = data("https://www.douyu.com/swf_api/homeH5Enc?rids=$roomId").str("room$roomId")
-        if (script.isBlank()) throw PlatformException("斗鱼没有返回签名脚本")
-        val signature = signer.douyu(script, roomId, UUID.randomUUID().toString().replace("-", ""), System.currentTimeMillis() / 1000)
-        val endpoint = "https://www.douyu.com/lapi/live/getH5Play/$roomId"
-        val options = data(endpoint, "$signature&cdn=&rate=-1&ver=Douyu_223061205&iar=1&ive=1&hevc=0&fa=0")
+        val cookie = credentials.get(Platform.DOUYU)
+        val requestHeaders = headers + ("Cookie" to cookie)
+        val device = cookie.split(';').map { it.trim() }.firstOrNull { it.startsWith("dy_did=") }
+            ?.substringAfter('=')?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString().replace("-", "")
+        val encryption = data("https://www.douyu.com/wgapi/livenc/liveweb/websec/getEncryption?did=${encoded(device)}", requestHeaders = requestHeaders)
+        val seconds = System.currentTimeMillis() / 1000
+        val rounds = encryption.getInt("enc_time")
+        require(rounds in 0..10000) { "斗鱼签名参数无效" }
+        var auth = encryption.getString("rand_str")
+        val key = encryption.getString("key")
+        repeat(rounds) { auth = md5(auth + key) }
+        auth = md5(auth + key + if (encryption.optInt("is_special") == 1) "" else "$roomId$seconds")
+        val signature = query("enc_data" to encryption.getString("enc_data"), "tt" to seconds.toString(), "did" to device, "auth" to auth)
+        val endpoint = "https://www.douyu.com/lapi/live/getH5PlayV1/$roomId"
+        val parameters = "&ver=Douyu_new&iar=0&ive=0&hevc=0&fa=0"
+        val options = data(endpoint, "$signature&cdn=&rate=-1$parameters", requestHeaders)
         val qualities = options.arr("multirates").objects().map { Choice(it.str("rate"), it.str("name")) }
         val lines = options.arr("cdnsWithName").objects().map { Choice(it.str("cdn"), it.str("name", it.str("cdn"))) }.sortedBy { it.id.startsWith("scdn") }
         val selectedQuality = qualities.firstOrNull { it.id == quality || it.name == quality } ?: qualities.firstOrNull() ?: throw PlatformException("斗鱼没有返回画质")
         val selectedLine = lines.firstOrNull { it.id == line } ?: lines.firstOrNull() ?: throw PlatformException("斗鱼没有返回线路")
-        val play = data(endpoint, "$signature&cdn=${encoded(selectedLine.id)}&rate=${encoded(selectedQuality.id)}&hevc=0")
+        val play = data(endpoint, "$signature&cdn=${encoded(selectedLine.id)}&rate=${encoded(selectedQuality.id)}$parameters", requestHeaders)
+        val actualQualities = play.arr("multirates").objects().map { Choice(it.str("rate"), it.str("name")) }.ifEmpty { qualities }
+        // A successful request can still be downgraded; only the returned rate identifies the stream.
+        val actualQuality = actualQualities.firstOrNull { it.id == play.str("rate") }
+            ?: throw PlatformException("斗鱼未返回可确认的实际画质，请重新加载")
+        val actualLine = play.str("selected_cdn").ifBlank { play.str("rtmp_cdn") }
+        LiveDiagnostics.record("DouyuQuality","requested=${selectedQuality.id} returned=${actualQuality.id} requestedLine=${selectedLine.id} returnedLine=$actualLine session=${cookie.isNotBlank()}")
         val url = "${play.str("rtmp_url")}/${org.jsoup.parser.Parser.unescapeEntities(play.str("rtmp_live"), false)}"
-        return Playback(current, validateStream(Platform.DOUYU, url), headers, qualities, lines, selectedQuality.id, selectedLine.id)
+        return Playback(current, validateStream(Platform.DOUYU, url), headers, actualQualities, lines, actualQuality.id, actualLine)
     }
 }

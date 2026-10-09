@@ -15,7 +15,7 @@ class LiveApplication : Application() {
     val credentials by lazy { Credentials(this) }
     val signer by lazy { SignatureEngine(this) }
     val platforms: Map<Platform,LivePlatform> by lazy { mapOf(
-        Platform.DOUYU to DouyuPlatform(network,signer),
+        Platform.DOUYU to DouyuPlatform(network,credentials),
         Platform.HUYA to HuyaPlatform(this,network),
         Platform.DOUYIN to DouyinPlatform(this,network,credentials),
         Platform.BILIBILI to BilibiliPlatform(this,network,credentials),
